@@ -21,6 +21,7 @@ fn main() {
         app.add_systems(Update, profile_system);
     }
 
+    app.add_plugins(tile_core::activity::CorePlugin);
     app.add_systems(Update, dummy_system);
 
     app.run();

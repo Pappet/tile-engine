@@ -10,6 +10,10 @@ pub struct ChunkData {
     #[serde(with = "chunk_array_serde")]
     pub terrain: Box<[MaterialId; CHUNK_AREA]>,
     pub dirty: bool,
+    #[serde(skip)]
+    pub active: crate::activity::SystemMask,
+    #[serde(skip)]
+    pub last_active_tick: u64,
 }
 
 mod chunk_array_serde {
@@ -49,6 +53,8 @@ impl ChunkData {
             coord,
             terrain,
             dirty: false,
+            active: crate::activity::SystemMask::empty(),
+            last_active_tick: 0,
         }
     }
 }
