@@ -3,15 +3,30 @@ use tile_core::chunk::ChunkData;
 use tile_core::coords::{CHUNK_SIZE, CHUNK_AREA};
 use tile_core::material::MAT_AIR;
 
-/// Single-chunk horizontal fluid CA.
+/// Bibel §8.3 — Symmetrische Bilanzgleichung.
 ///
-/// For each tile that contains liquid AND is passable (terrain == AIR):
-///   1. Gather the set of passable cardinal neighbors.
-///   2. Equalize liquid_amount among self + those neighbors.
-///   3. Accumulate deltas, then apply to `liquid_amount_write`.
+/// Both sides of a chunk boundary call this with the same arguments
+/// and only modify their own write buffer. Mass conservation is automatic.
 ///
-/// Mass-conserving by construction: total transferred out
-/// equals total transferred in across all participants.
+/// `viscosity`: 0 = max flow, 255 = no flow.
+/// For P4.3 we default to 0 (wired to LiquidRegistry in P4.8).
+#[inline]
+pub fn flow_between(here: u8, there: u8, viscosity: u8) -> i16 {
+    if here <= there + 1 {
+        return 0;
+    }
+    let raw = (here as i16 - there as i16) / 4;
+    raw * (256 - viscosity as i16) / 256
+}
+
+/// Single-chunk horizontal fluid CA using bilateral `flow_between`.
+///
+/// Each tile only processes its RIGHT and DOWN neighbor to avoid
+/// double-counting. The left/up neighbor pair is handled when
+/// *that* neighbor processes its right/down.
+///
+/// This matches Bibel §8.3 / §8.5 principle 2 and prepares for
+/// cross-chunk symmetry in P4.4.
 pub fn fluid_step_local(mut chunks: Query<&mut ChunkData>) {
     for mut chunk in chunks.iter_mut() {
         // Skip entirely if no liquid present in read buffer
@@ -20,66 +35,69 @@ pub fn fluid_step_local(mut chunks: Query<&mut ChunkData>) {
             continue;
         }
 
-        // ── Phase 1: compute deltas (read-only snapshot) ─────────────────
-        // Copy read amounts to a local buffer so we can later mutably borrow chunk.
+        // ── Phase 1: snapshot + compute deltas ──────────────────────────
         let mut amounts = [0u8; CHUNK_AREA];
         amounts.copy_from_slice(&*chunk.liquid_amount_read);
 
         let mut deltas = [0i16; CHUNK_AREA];
         let terrain = &*chunk.terrain;
 
+        // Default viscosity = 0 (max flow). Will be per-liquid in P4.8.
+        let viscosity: u8 = 0;
+
         for y in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let idx = y * CHUNK_SIZE + x;
-                let amount = amounts[idx];
-                if amount == 0 || terrain[idx] != MAT_AIR {
+
+                // Skip solid tiles
+                if terrain[idx] != MAT_AIR {
                     continue;
                 }
 
-                // Collect passable neighbor indices
-                let mut nb = [0usize; 4];
-                let mut nb_count = 0usize;
+                let here = amounts[idx];
 
-                if x > 0 {
-                    let ni = idx - 1;
-                    if terrain[ni] == MAT_AIR { nb[nb_count] = ni; nb_count += 1; }
-                }
+                // ── Right neighbor ───────────────────────────────────────
                 if x + 1 < CHUNK_SIZE {
                     let ni = idx + 1;
-                    if terrain[ni] == MAT_AIR { nb[nb_count] = ni; nb_count += 1; }
+                    if terrain[ni] == MAT_AIR {
+                        let there = amounts[ni];
+                        let flow = flow_between(here, there, viscosity);
+                        if flow > 0 {
+                            deltas[idx] -= flow;
+                            deltas[ni] += flow;
+                        } else {
+                            // Check reverse direction (there → here)
+                            let rev = flow_between(there, here, viscosity);
+                            if rev > 0 {
+                                deltas[ni] -= rev;
+                                deltas[idx] += rev;
+                            }
+                        }
+                    }
                 }
-                if y > 0 {
-                    let ni = idx - CHUNK_SIZE;
-                    if terrain[ni] == MAT_AIR { nb[nb_count] = ni; nb_count += 1; }
-                }
+
+                // ── Down neighbor ────────────────────────────────────────
                 if y + 1 < CHUNK_SIZE {
                     let ni = idx + CHUNK_SIZE;
-                    if terrain[ni] == MAT_AIR { nb[nb_count] = ni; nb_count += 1; }
-                }
-
-                if nb_count == 0 {
-                    continue;
-                }
-
-                // Equalize: transfer from higher to lower.
-                // Transfer per neighbor = (our - theirs) / (nb_count + 1), floored.
-                let divisor = (nb_count as u16) + 1;
-                for i in 0..nb_count {
-                    let ni = nb[i];
-                    let n_amount = amounts[ni];
-                    if amount > n_amount {
-                        let diff = (amount as u16) - (n_amount as u16);
-                        let transfer = (diff / divisor) as i16;
-                        if transfer > 0 {
-                            deltas[idx] -= transfer;
-                            deltas[ni] += transfer;
+                    if terrain[ni] == MAT_AIR {
+                        let there = amounts[ni];
+                        let flow = flow_between(here, there, viscosity);
+                        if flow > 0 {
+                            deltas[idx] -= flow;
+                            deltas[ni] += flow;
+                        } else {
+                            let rev = flow_between(there, here, viscosity);
+                            if rev > 0 {
+                                deltas[ni] -= rev;
+                                deltas[idx] += rev;
+                            }
                         }
                     }
                 }
             }
         }
 
-        // ── Phase 2: apply deltas (write access) ────────────────────────
+        // ── Phase 2: apply deltas ───────────────────────────────────────
         chunk.liquid_amount_write.copy_from_slice(&amounts);
         for i in 0..CHUNK_AREA {
             if deltas[i] != 0 {
@@ -123,10 +141,27 @@ mod tests {
     }
 
     #[test]
+    fn test_flow_between_basic() {
+        // Large difference → flow
+        assert!(flow_between(100, 0, 0) > 0);
+        // Equal → no flow
+        assert_eq!(flow_between(50, 50, 0), 0);
+        // Difference of 1 → no flow (threshold: here <= there+1)
+        assert_eq!(flow_between(51, 50, 0), 0);
+        // Difference of 2 → no flow (raw = 2/4 = 0)
+        assert_eq!(flow_between(52, 50, 0), 0);
+        // High viscosity → reduced flow
+        let full = flow_between(100, 0, 0);
+        let visc = flow_between(100, 0, 200);
+        assert!(visc < full);
+        // Max viscosity → no flow
+        assert_eq!(flow_between(100, 0, 255), 0);
+    }
+
+    #[test]
     fn test_mass_conservation() {
         let mut app = bevy_app::App::new();
 
-        // Place a blob of water in the center
         let chunk = make_water_chunk(&[
             (16, 16, 200),
             (17, 16, 100),
@@ -137,7 +172,6 @@ mod tests {
 
         app.add_systems(bevy_app::Update, (fluid_step_local, swap_buffers_system).chain());
 
-        // Run 20 simulation ticks
         for _ in 0..20 {
             app.update();
         }
@@ -160,16 +194,12 @@ mod tests {
         let chunk = app.world().get::<ChunkData>(entity).unwrap();
         let center = 16 * CHUNK_SIZE + 16;
         let right  = 16 * CHUNK_SIZE + 17;
-        let left   = 16 * CHUNK_SIZE + 15;
-        let up     = 15 * CHUNK_SIZE + 16;
         let down   = 17 * CHUNK_SIZE + 16;
 
         assert!(chunk.liquid_amount_read[center] < 100, "Center should lose some water");
-        let neighbor_total = chunk.liquid_amount_read[right] as u32
-            + chunk.liquid_amount_read[left] as u32
-            + chunk.liquid_amount_read[up] as u32
-            + chunk.liquid_amount_read[down] as u32;
-        assert!(neighbor_total > 0, "Neighbors should have gained water");
+        // At least right and down neighbors should gain water
+        assert!(chunk.liquid_amount_read[right] > 0 || chunk.liquid_amount_read[down] > 0,
+            "At least one neighbor should have gained water");
     }
 
     #[test]
@@ -202,11 +232,10 @@ mod tests {
         let mut app = bevy_app::App::new();
 
         let mut chunk = make_water_chunk(&[(5, 5, 200)]);
-        // Surround the water tile with solid terrain on all 4 sides
-        chunk.terrain[5 * CHUNK_SIZE + 4] = tile_core::material::MaterialId(1); // left
-        chunk.terrain[5 * CHUNK_SIZE + 6] = tile_core::material::MaterialId(1); // right
-        chunk.terrain[4 * CHUNK_SIZE + 5] = tile_core::material::MaterialId(1); // up
-        chunk.terrain[6 * CHUNK_SIZE + 5] = tile_core::material::MaterialId(1); // down
+        chunk.terrain[5 * CHUNK_SIZE + 4] = tile_core::material::MaterialId(1);
+        chunk.terrain[5 * CHUNK_SIZE + 6] = tile_core::material::MaterialId(1);
+        chunk.terrain[4 * CHUNK_SIZE + 5] = tile_core::material::MaterialId(1);
+        chunk.terrain[6 * CHUNK_SIZE + 5] = tile_core::material::MaterialId(1);
 
         let entity = app.world_mut().spawn(chunk).id();
         app.add_systems(bevy_app::Update, (fluid_step_local, swap_buffers_system).chain());
