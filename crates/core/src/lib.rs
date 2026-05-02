@@ -1,5 +1,6 @@
 // core: data model, coordinates, World-API
 
+pub mod activity;
 pub mod chunk;
 pub mod coords;
 pub mod material;
