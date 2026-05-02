@@ -12,6 +12,7 @@ Bevy-based voxel tile engine with fluid and reaction simulation.
 ```sh
 cargo build --workspace
 cargo run -p app
+cargo run -p app --features profile # Run with puffin profiler
 ```
 
 ## Contribution
