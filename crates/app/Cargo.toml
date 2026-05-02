@@ -8,6 +8,7 @@ bevy = { workspace = true }
 puffin = { workspace = true, optional = true }
 puffin_http = { workspace = true, optional = true }
 tile_core = { path = "../core" }
+render_bevy = { path = "../render-bevy" }
 
 [features]
 profile = ["dep:puffin", "dep:puffin_http"]
