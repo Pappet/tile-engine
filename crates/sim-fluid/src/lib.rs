@@ -1,9 +1,24 @@
+pub mod fluid_ca;
+
 use bevy_ecs::prelude::Resource;
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tile_core::material::MaterialId;
 pub use tile_core::liquid::{LiquidId, GasId, LIQ_NONE};
+
+/// Bevy plugin that registers the single-chunk fluid simulation systems.
+pub struct FluidPlugin;
+
+impl bevy_app::Plugin for FluidPlugin {
+    fn build(&self, app: &mut bevy_app::App) {
+        use bevy_ecs::schedule::IntoSystemConfigs;
+        app.add_systems(bevy_app::Update, (
+            fluid_ca::fluid_step_local,
+            fluid_ca::swap_buffers_system,
+        ).chain());
+    }
+}
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
