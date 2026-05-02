@@ -3,15 +3,7 @@ use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tile_core::material::MaterialId;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct LiquidId(pub u16);
-
-pub const LIQ_NONE: LiquidId = LiquidId(0);
-
-// Stub for gas
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct GasId(pub u16);
+pub use tile_core::liquid::{LiquidId, GasId, LIQ_NONE};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
