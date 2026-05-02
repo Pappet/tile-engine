@@ -33,7 +33,6 @@ fn main() {
     }
     app.insert_resource(material_reg);
 
-    app.add_systems(Startup, setup_camera);
     app.add_systems(Startup, setup_demo_system);
     app.add_systems(Update, dummy_system);
 
@@ -43,10 +42,6 @@ fn main() {
 #[cfg(feature = "profile")]
 fn profile_system() {
     puffin::GlobalProfiler::lock().new_frame();
-}
-
-fn setup_camera(mut commands: Commands) {
-    commands.spawn(Camera2dBundle::default());
 }
 
 fn dummy_system() {
