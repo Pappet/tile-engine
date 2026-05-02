@@ -1,3 +1,5 @@
+pub mod structures;
+
 use bevy_ecs::prelude::*;
 use tile_core::coords::WorldPos;
 
