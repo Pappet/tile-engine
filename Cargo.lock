@@ -183,7 +183,10 @@ dependencies = [
  "bevy",
  "puffin 0.19.1",
  "puffin_http",
+ "render_bevy",
  "tile_core",
+ "worldgen_api",
+ "worldgen_earthlike",
 ]
 
 [[package]]
@@ -2702,6 +2705,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "noise"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6da45c8333f2e152fc665d78a380be060eb84fad8ca4c9f7ac8ca29216cff0cc"
+dependencies = [
+ "num-traits",
+ "rand 0.8.6",
+ "rand_xorshift 0.3.0",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3249,7 +3263,7 @@ dependencies = [
  "num-traits",
  "rand 0.9.4",
  "rand_chacha",
- "rand_xorshift",
+ "rand_xorshift 0.4.0",
  "regex-syntax",
  "rusty-fork",
  "tempfile",
@@ -3384,6 +3398,15 @@ dependencies = [
 
 [[package]]
 name = "rand_xorshift"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d25bf25ec5ae4a3f1b92f929810509a2f53d7dca2f50b794ff57e3face536c8f"
+dependencies = [
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand_xorshift"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
@@ -3466,8 +3489,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
-name = "render-bevy"
+name = "render_bevy"
 version = "0.1.0"
+dependencies = [
+ "bevy",
+ "tile_core",
+]
 
 [[package]]
 name = "renderdoc-sys"
@@ -3621,6 +3648,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-big-array"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11fc7cc2c76d73e0f27ee52abbd64eec84d46f370c88371120433196934e4b7f"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3669,16 +3705,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
-name = "sim-fluid"
-version = "0.1.0"
-
-[[package]]
 name = "sim-reaction"
 version = "0.1.0"
 
 [[package]]
 name = "sim-thermal"
 version = "0.1.0"
+
+[[package]]
+name = "sim_fluid"
+version = "0.1.0"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bincode",
+ "bitflags 2.11.1",
+ "serde",
+ "smallvec",
+ "tile_core",
+]
 
 [[package]]
 name = "simd-adler32"
@@ -3880,10 +3925,13 @@ dependencies = [
 name = "tile_core"
 version = "0.1.0"
 dependencies = [
+ "bevy_app",
  "bevy_ecs",
+ "bincode",
  "bitflags 2.11.1",
  "proptest",
  "serde",
+ "serde-big-array",
  "serde_json",
  "smallvec",
 ]
@@ -4864,12 +4912,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "worldgen-api"
+name = "worldgen_api"
 version = "0.1.0"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bincode",
+ "serde",
+ "tile_core",
+]
 
 [[package]]
-name = "worldgen-earthlike"
+name = "worldgen_earthlike"
 version = "0.1.0"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "noise",
+ "tile_core",
+ "worldgen_api",
+]
 
 [[package]]
 name = "x11-dl"
