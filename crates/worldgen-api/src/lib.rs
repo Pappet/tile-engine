@@ -64,7 +64,7 @@ pub struct StratigraphyMap {
 pub trait SurfaceQuery {
     /// Returns the surface Z-level at a given global (X, Y).
     fn get_surface_z(&self, x: i32, y: i32) -> i32;
-    
+
     /// Helper to check if a specific 3D tile is underground.
     fn is_underground(&self, pos: WorldPos) -> bool {
         pos.z < self.get_surface_z(pos.x, pos.y)
@@ -81,7 +81,9 @@ impl SurfaceQuery for Heightmap {
 
 /// SplitMix64-style hash to derive deterministic sub-seeds or random numbers.
 pub fn subseed(master: u64, modifier: u64) -> u64 {
-    let mut x = master.wrapping_add(modifier).wrapping_add(0x9E3779B97F4A7C15);
+    let mut x = master
+        .wrapping_add(modifier)
+        .wrapping_add(0x9E3779B97F4A7C15);
     x = (x ^ (x >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
     x = (x ^ (x >> 27)).wrapping_mul(0x94D049BB133111EB);
     x ^ (x >> 31)
@@ -97,7 +99,7 @@ mod tests {
         let s1 = subseed(master, 100);
         let s2 = subseed(master, 100);
         let s3 = subseed(master, 101);
-        
+
         assert_eq!(s1, s2, "Same inputs must yield same output");
         assert_ne!(s1, s3, "Different inputs should yield different outputs");
     }

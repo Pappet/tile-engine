@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::chunk::ChunkData;
 use crate::coords::{ChunkCoord, WorldPos};

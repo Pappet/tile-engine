@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 fn main() {
     let mut app = App::new();
-    
+
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "Tile Engine".to_string(),
@@ -26,13 +26,13 @@ fn main() {
     app.add_plugins(worldgen_earthlike::EarthlikeWorldgenPlugin);
 
     app.init_resource::<tile_core::world::World>();
-    
+
     // Configure Worldgen
     app.insert_resource(worldgen_api::WorldgenConfig {
         seed: 123456789,
         bounds_radius: Some(2), // 2x2 chunk bounds radius -> 4x4 chunks (16 chunks)
     });
-    
+
     // Initialize MaterialRegistry with builtin materials
     let mut material_reg = tile_core::material::MaterialRegistry::default();
     for (id, mat) in tile_core::material::builtin_materials() {
@@ -56,14 +56,13 @@ fn dummy_system() {
     // Do nothing
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tile_core::world::{World, WorldAccess, WorldAccessMut, Tile};
     use tile_core::chunk::ChunkData;
     use tile_core::coords::WorldPos;
     use tile_core::material::MaterialId;
+    use tile_core::world::{Tile, World, WorldAccess, WorldAccessMut};
 
     fn ensure_chunks_system(mut access: WorldAccessMut) {
         for i in -50..50 {
@@ -77,7 +76,12 @@ mod tests {
         // Write 100 tiles over multiple chunks including negative coords
         for i in -50..50 {
             let pos = WorldPos { x: i, y: i, z: 0 };
-            access.set_tile(pos, Tile { material: MaterialId(42) });
+            access.set_tile(
+                pos,
+                Tile {
+                    material: MaterialId(42),
+                },
+            );
         }
     }
 
@@ -89,7 +93,11 @@ mod tests {
         }
 
         // Verify that the chunks are marked as dirty
-        let pos = WorldPos { x: -50, y: -50, z: 0 };
+        let pos = WorldPos {
+            x: -50,
+            y: -50,
+            z: 0,
+        };
         let (cc, _) = pos.split();
         let chunk = access.get_chunk(cc).expect("Chunk should exist");
         assert!(chunk.dirty);
@@ -106,15 +114,24 @@ mod tests {
         app.add_systems(Startup, setup_system);
         // Verify runs in Update
         app.add_systems(Update, verify_system);
-        
+
         // This will run PreStartup, apply commands, Startup, apply commands, then Update
         app.update();
     }
 
     fn caveat_system(mut access: WorldAccessMut) {
-        let pos = WorldPos { x: 1000, y: 1000, z: 1000 };
+        let pos = WorldPos {
+            x: 1000,
+            y: 1000,
+            z: 1000,
+        };
         // Trying to set a tile in a non-existent chunk
-        access.set_tile(pos, Tile { material: MaterialId(99) });
+        access.set_tile(
+            pos,
+            Tile {
+                material: MaterialId(99),
+            },
+        );
         // Reading it immediately in the same system fails because the ChunkData is not spawned yet!
         assert!(access.get_chunk(pos.split().0).is_none());
     }
@@ -127,11 +144,18 @@ mod tests {
         app.update();
         // After the update, commands have been applied, so the chunk NOW exists
         // but the tile modification from set_tile was lost due to the caveat.
-        let pos = WorldPos { x: 1000, y: 1000, z: 1000 };
+        let pos = WorldPos {
+            x: 1000,
+            y: 1000,
+            z: 1000,
+        };
         let world = app.world().resource::<World>();
         let entity = world.chunks.get(&pos.split().0).unwrap();
         let chunk_data = app.world().get::<ChunkData>(*entity).unwrap();
         // Still MAT_AIR (0), not 99!
-        assert_eq!(chunk_data.terrain[pos.split().1.index()], tile_core::material::MAT_AIR);
+        assert_eq!(
+            chunk_data.terrain[pos.split().1.index()],
+            tile_core::material::MAT_AIR
+        );
     }
 }

@@ -3,10 +3,10 @@
 pub mod activity;
 pub mod chunk;
 pub mod coords;
+pub mod liquid;
 pub mod material;
 pub mod world;
-pub mod liquid;
 
 pub use material::{
-    builtin_materials, ElementId, MAT_AIR, Material, MaterialFlags, MaterialId, MaterialRegistry,
+    ElementId, MAT_AIR, Material, MaterialFlags, MaterialId, MaterialRegistry, builtin_materials,
 };

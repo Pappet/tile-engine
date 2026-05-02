@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::Resource;
 use serde::{Deserialize, Serialize};
-use tile_core::coords::{ChunkCoord, WorldPos};
 use std::collections::HashMap;
+use tile_core::coords::{ChunkCoord, WorldPos};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaveStructure {
@@ -58,12 +58,29 @@ mod tests {
     fn test_world_structures_serde() {
         let mut ws = WorldStructures::default();
         let cave = CaveStructure {
-            center: WorldPos { x: 100, y: 100, z: 10 },
+            center: WorldPos {
+                x: 100,
+                y: 100,
+                z: 10,
+            },
             radius: 5.0,
             length: 50.0,
         };
-        ws.structures.insert(1, WorldStructure { id: 1, data: StructureType::Cave(cave) });
-        ws.index.buckets.insert(ChunkCoord { cx: 0, cy: 0, cz: 0 }, vec![1]);
+        ws.structures.insert(
+            1,
+            WorldStructure {
+                id: 1,
+                data: StructureType::Cave(cave),
+            },
+        );
+        ws.index.buckets.insert(
+            ChunkCoord {
+                cx: 0,
+                cy: 0,
+                cz: 0,
+            },
+            vec![1],
+        );
 
         let serialized = bincode::serialize(&ws).unwrap();
         let deserialized: WorldStructures = bincode::deserialize(&serialized).unwrap();
