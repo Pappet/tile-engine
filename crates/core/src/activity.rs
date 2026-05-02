@@ -33,8 +33,7 @@ fn activity_decay_system(
 ) {
     let current_tick = world.current_tick;
     for mut chunk in chunks.iter_mut() {
-        if !chunk.active.is_empty()
-            && current_tick >= chunk.last_active_tick + ACTIVITY_DECAY_TICKS
+        if !chunk.active.is_empty() && current_tick >= chunk.last_active_tick + ACTIVITY_DECAY_TICKS
         {
             chunk.active = SystemMask::empty();
         }

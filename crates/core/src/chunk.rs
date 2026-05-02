@@ -49,10 +49,7 @@ mod box_array_material {
 mod box_array_i16 {
     use super::*;
     use serde::{Deserializer, Serializer};
-    pub fn serialize<S: Serializer>(
-        data: &[i16; CHUNK_AREA],
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(data: &[i16; CHUNK_AREA], s: S) -> Result<S::Ok, S::Error> {
         let slice: &[i16] = data;
         serde::Serialize::serialize(slice, s)
     }
