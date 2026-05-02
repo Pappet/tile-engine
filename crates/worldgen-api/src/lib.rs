@@ -24,7 +24,22 @@ pub struct WorldgenConfig {
 
 #[derive(Resource, Default)]
 pub struct Heightmap {
-    // Stub
+    pub width: i32,
+    pub height: i32,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub data: Vec<i32>,
+}
+
+impl Heightmap {
+    pub fn get_z(&self, x: i32, y: i32) -> i32 {
+        let lx = x - self.offset_x;
+        let ly = y - self.offset_y;
+        if lx < 0 || lx >= self.width || ly < 0 || ly >= self.height {
+            return 0; // Default out-of-bounds
+        }
+        self.data[(ly * self.width + lx) as usize]
+    }
 }
 
 #[derive(Resource, Default)]
@@ -51,6 +66,12 @@ pub trait SurfaceQuery {
     /// Helper to check if a specific 3D tile is underground.
     fn is_underground(&self, pos: WorldPos) -> bool {
         pos.z < self.get_surface_z(pos.x, pos.y)
+    }
+}
+
+impl SurfaceQuery for Heightmap {
+    fn get_surface_z(&self, x: i32, y: i32) -> i32 {
+        self.get_z(x, y)
     }
 }
 
