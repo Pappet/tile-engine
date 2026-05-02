@@ -1,7 +1,5 @@
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_big_array::BigArray;
-
 use crate::coords::{ChunkCoord, CHUNK_AREA};
 use crate::material::{MaterialId, MAT_AIR};
 use crate::liquid::{LiquidId, LIQ_NONE};
