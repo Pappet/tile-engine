@@ -41,6 +41,7 @@ fn dummy_system() {
 mod tests {
     use super::*;
     use tile_core::world::{World, WorldAccess, WorldAccessMut, Tile};
+    use tile_core::chunk::ChunkData;
     use tile_core::coords::WorldPos;
     use tile_core::material::MaterialId;
 
@@ -88,5 +89,29 @@ mod tests {
         
         // This will run PreStartup, apply commands, Startup, apply commands, then Update
         app.update();
+    }
+
+    fn caveat_system(mut access: WorldAccessMut) {
+        let pos = WorldPos { x: 1000, y: 1000, z: 1000 };
+        // Trying to set a tile in a non-existent chunk
+        access.set_tile(pos, Tile { material: MaterialId(99) });
+        // Reading it immediately in the same system fails because the ChunkData is not spawned yet!
+        assert!(access.get_chunk(pos.split().0).is_none());
+    }
+
+    #[test]
+    fn test_deferred_spawn_caveat() {
+        let mut app = App::new();
+        app.init_resource::<World>();
+        app.add_systems(Update, caveat_system);
+        app.update();
+        // After the update, commands have been applied, so the chunk NOW exists
+        // but the tile modification from set_tile was lost due to the caveat.
+        let pos = WorldPos { x: 1000, y: 1000, z: 1000 };
+        let world = app.world().resource::<World>();
+        let entity = world.chunks.get(&pos.split().0).unwrap();
+        let chunk_data = app.world().get::<ChunkData>(*entity).unwrap();
+        // Still MAT_AIR (0), not 99!
+        assert_eq!(chunk_data.terrain[pos.split().1.index()], tile_core::material::MAT_AIR);
     }
 }
