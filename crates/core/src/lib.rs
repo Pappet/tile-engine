@@ -3,6 +3,7 @@
 pub mod chunk;
 pub mod coords;
 pub mod material;
+pub mod world;
 
 pub use material::{
     builtin_materials, ElementId, MAT_AIR, Material, MaterialFlags, MaterialId, MaterialRegistry,
