@@ -3,6 +3,8 @@ use tile_core::chunk::ChunkData;
 use tile_core::material::{MaterialRegistry, MAT_AIR};
 use tile_core::coords::CHUNK_SIZE;
 
+pub mod camera;
+
 #[derive(Resource)]
 pub struct ActiveZLayer(pub i32);
 
@@ -22,6 +24,8 @@ pub struct RenderPlugin;
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveZLayer>();
+        app.add_systems(Startup, camera::setup_camera);
+        app.add_systems(Update, camera::camera_control_system);
         app.add_systems(Update, handle_z_layer_change);
         app.add_systems(Update, render_chunks_system.after(handle_z_layer_change));
     }
