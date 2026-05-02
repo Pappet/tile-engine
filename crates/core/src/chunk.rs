@@ -48,7 +48,7 @@ impl ChunkData {
         Self {
             coord,
             terrain,
-            dirty: true,
+            dirty: false,
         }
     }
 }
@@ -75,6 +75,6 @@ mod tests {
         assert_eq!(chunk.coord, coord);
         assert_eq!(chunk.terrain[0], MAT_AIR);
         assert_eq!(chunk.terrain[CHUNK_AREA - 1], MAT_AIR);
-        assert!(chunk.dirty);
+        assert!(!chunk.dirty);
     }
 }
