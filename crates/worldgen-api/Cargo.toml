@@ -1,6 +1,9 @@
 [package]
-name = "worldgen-api"
+name = "worldgen_api"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bevy_ecs = "0.14.2"
+bevy_app = "0.14.2"
+tile_core = { path = "../core" }
