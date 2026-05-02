@@ -59,11 +59,15 @@ impl<'w, 's> WorldAccessMut<'w, 's> {
 
     /// Returns the entity of the chunk. If it didn't exist, it is queued for spawning.
     ///
-    /// # Caveat
+    /// # Caveat (P1.5 Deferred Spawn)
     ///
     /// Due to Bevy's deferred `Commands` execution, if a chunk is newly spawned by this
     /// function, its `ChunkData` component will **not** be accessible via the `chunks` query
     /// until the next system/stage execution!
+    ///
+    /// **Pattern to use:** Pre-Pass. Systems that generate new chunks (e.g., Worldgen)
+    /// should run in an earlier Schedule/Stage (like `PreStartup` or `PreUpdate`) so that
+    /// the chunks are fully spawned and queryable by Simulation/Logic systems.
     pub fn ensure_chunk(&mut self, coord: ChunkCoord) -> Entity {
         if let Some(&entity) = self.world.chunks.get(&coord) {
             return entity;
@@ -76,8 +80,10 @@ impl<'w, 's> WorldAccessMut<'w, 's> {
 
     /// Sets a tile's material.
     ///
-    /// If the chunk does not exist, it will be spawned, but the tile will NOT be modified
-    /// in the same frame due to the deferred spawn caveat!
+    /// # Caveat
+    /// If the chunk does not exist yet, it will be queued for spawning, but the tile
+    /// will **NOT** be modified in the same frame due to the deferred spawn caveat.
+    /// You must pre-create chunks in a prior stage.
     pub fn set_tile(&mut self, pos: WorldPos, tile: Tile) {
         let (cc, lp) = pos.split();
         let entity = self.ensure_chunk(cc);
