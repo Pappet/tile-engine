@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::*;
 use tile_core::chunk::ChunkData;
-use tile_core::coords::{CHUNK_SIZE, CHUNK_AREA};
+use tile_core::coords::{CHUNK_AREA, CHUNK_SIZE};
 use tile_core::material::MAT_AIR;
 
 /// Bibel §8.3 — Symmetrische Bilanzgleichung.
@@ -99,9 +99,9 @@ pub fn fluid_step_local(mut chunks: Query<&mut ChunkData>) {
 
         // ── Phase 2: apply deltas ───────────────────────────────────────
         chunk.liquid_amount_write.copy_from_slice(&amounts);
-        for i in 0..CHUNK_AREA {
-            if deltas[i] != 0 {
-                let new_val = (chunk.liquid_amount_write[i] as i16) + deltas[i];
+        for (i, &delta) in deltas.iter().enumerate() {
+            if delta != 0 {
+                let new_val = (chunk.liquid_amount_write[i] as i16) + delta;
                 chunk.liquid_amount_write[i] = new_val.clamp(0, 255) as u8;
             }
         }
@@ -129,7 +129,11 @@ mod tests {
     /// Helper: create a flat air chunk with some water placed.
     fn make_water_chunk(water_tiles: &[(usize, usize, u8)]) -> ChunkData {
         let mut chunk = ChunkData::new_filled(
-            ChunkCoord { cx: 0, cy: 0, cz: 0 },
+            ChunkCoord {
+                cx: 0,
+                cy: 0,
+                cz: 0,
+            },
             MAT_AIR,
         );
         for &(x, y, amount) in water_tiles {
@@ -162,15 +166,14 @@ mod tests {
     fn test_mass_conservation() {
         let mut app = bevy_app::App::new();
 
-        let chunk = make_water_chunk(&[
-            (16, 16, 200),
-            (17, 16, 100),
-            (15, 16, 50),
-        ]);
+        let chunk = make_water_chunk(&[(16, 16, 200), (17, 16, 100), (15, 16, 50)]);
         let initial_mass = total_liquid(&chunk);
         let entity = app.world_mut().spawn(chunk).id();
 
-        app.add_systems(bevy_app::Update, (fluid_step_local, swap_buffers_system).chain());
+        app.add_systems(
+            bevy_app::Update,
+            (fluid_step_local, swap_buffers_system).chain(),
+        );
 
         for _ in 0..20 {
             app.update();
@@ -188,32 +191,37 @@ mod tests {
         let chunk = make_water_chunk(&[(16, 16, 100)]);
         let entity = app.world_mut().spawn(chunk).id();
 
-        app.add_systems(bevy_app::Update, (fluid_step_local, swap_buffers_system).chain());
+        app.add_systems(
+            bevy_app::Update,
+            (fluid_step_local, swap_buffers_system).chain(),
+        );
         app.update();
 
         let chunk = app.world().get::<ChunkData>(entity).unwrap();
         let center = 16 * CHUNK_SIZE + 16;
-        let right  = 16 * CHUNK_SIZE + 17;
-        let down   = 17 * CHUNK_SIZE + 16;
+        let right = 16 * CHUNK_SIZE + 17;
+        let down = 17 * CHUNK_SIZE + 16;
 
-        assert!(chunk.liquid_amount_read[center] < 100, "Center should lose some water");
+        assert!(
+            chunk.liquid_amount_read[center] < 100,
+            "Center should lose some water"
+        );
         // At least right and down neighbors should gain water
-        assert!(chunk.liquid_amount_read[right] > 0 || chunk.liquid_amount_read[down] > 0,
-            "At least one neighbor should have gained water");
+        assert!(
+            chunk.liquid_amount_read[right] > 0 || chunk.liquid_amount_read[down] > 0,
+            "At least one neighbor should have gained water"
+        );
     }
 
     #[test]
     fn test_determinism() {
         fn run_sim(ticks: usize) -> Vec<u8> {
             let mut app = bevy_app::App::new();
-            let chunk = make_water_chunk(&[
-                (16, 16, 200),
-                (10, 10, 100),
-                (20, 5, 150),
-            ]);
+            let chunk = make_water_chunk(&[(16, 16, 200), (10, 10, 100), (20, 5, 150)]);
             let entity = app.world_mut().spawn(chunk).id();
-            app.add_systems(bevy_app::Update,
-                (fluid_step_local, swap_buffers_system).chain()
+            app.add_systems(
+                bevy_app::Update,
+                (fluid_step_local, swap_buffers_system).chain(),
             );
             for _ in 0..ticks {
                 app.update();
@@ -224,7 +232,10 @@ mod tests {
 
         let run_a = run_sim(10);
         let run_b = run_sim(10);
-        assert_eq!(run_a, run_b, "Same initial state must produce identical results");
+        assert_eq!(
+            run_a, run_b,
+            "Same initial state must produce identical results"
+        );
     }
 
     #[test]
@@ -238,14 +249,20 @@ mod tests {
         chunk.terrain[6 * CHUNK_SIZE + 5] = tile_core::material::MaterialId(1);
 
         let entity = app.world_mut().spawn(chunk).id();
-        app.add_systems(bevy_app::Update, (fluid_step_local, swap_buffers_system).chain());
+        app.add_systems(
+            bevy_app::Update,
+            (fluid_step_local, swap_buffers_system).chain(),
+        );
 
         for _ in 0..5 {
             app.update();
         }
 
         let chunk = app.world().get::<ChunkData>(entity).unwrap();
-        assert_eq!(chunk.liquid_amount_read[5 * CHUNK_SIZE + 5], 200,
-            "Enclosed water must not move");
+        assert_eq!(
+            chunk.liquid_amount_read[5 * CHUNK_SIZE + 5],
+            200,
+            "Enclosed water must not move"
+        );
     }
 }

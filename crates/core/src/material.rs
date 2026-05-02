@@ -14,12 +14,12 @@ pub struct ElementId(pub u8);
 
 #[allow(dead_code)]
 impl ElementId {
-    pub const H:  Self = Self(0);
-    pub const C:  Self = Self(1);
-    pub const O:  Self = Self(2);
+    pub const H: Self = Self(0);
+    pub const C: Self = Self(1);
+    pub const O: Self = Self(2);
     pub const FE: Self = Self(3);
     pub const SI: Self = Self(4);
-    pub const S:  Self = Self(5);
+    pub const S: Self = Self(5);
 }
 
 bitflags! {
@@ -109,10 +109,7 @@ pub fn builtin_materials() -> [(MaterialId, Material); 6] {
             MaterialId(2),
             Material {
                 name: "Sandstein".into(),
-                composition: SmallVec::from_slice(&[
-                    (ElementId::SI, 0.40),
-                    (ElementId::O, 0.53),
-                ]),
+                composition: SmallVec::from_slice(&[(ElementId::SI, 0.40), (ElementId::O, 0.53)]),
                 density: 2.3,
                 hardness: 4.0,
                 melting_point: 1650.0,
@@ -127,10 +124,7 @@ pub fn builtin_materials() -> [(MaterialId, Material); 6] {
             MaterialId(3),
             Material {
                 name: "Sand".into(),
-                composition: SmallVec::from_slice(&[
-                    (ElementId::SI, 0.40),
-                    (ElementId::O, 0.53),
-                ]),
+                composition: SmallVec::from_slice(&[(ElementId::SI, 0.40), (ElementId::O, 0.53)]),
                 density: 1.6,
                 hardness: 2.0,
                 melting_point: 1650.0,
@@ -145,10 +139,7 @@ pub fn builtin_materials() -> [(MaterialId, Material); 6] {
             MaterialId(4),
             Material {
                 name: "Eis".into(),
-                composition: SmallVec::from_slice(&[
-                    (ElementId::H, 0.11),
-                    (ElementId::O, 0.89),
-                ]),
+                composition: SmallVec::from_slice(&[(ElementId::H, 0.11), (ElementId::O, 0.89)]),
                 density: 0.92,
                 hardness: 1.5,
                 melting_point: 0.0,

@@ -1,18 +1,12 @@
 use bevy::prelude::*;
 use tile_core::chunk::ChunkData;
-use tile_core::material::{MaterialRegistry, MAT_AIR};
 use tile_core::coords::CHUNK_SIZE;
+use tile_core::material::{MAT_AIR, MaterialRegistry};
 
 pub mod camera;
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct ActiveZLayer(pub i32);
-
-impl Default for ActiveZLayer {
-    fn default() -> Self {
-        Self(0)
-    }
-}
 
 #[derive(Component)]
 pub struct ChunkVisuals {
@@ -61,7 +55,7 @@ fn render_chunks_system(
         }
 
         let mut tiles = Vec::with_capacity(chunk.terrain.len());
-        
+
         // 16.0 pixel per tile.
         let offset_x = (chunk.coord.cx * CHUNK_SIZE as i32) as f32 * 16.0;
         let offset_y = (chunk.coord.cy * CHUNK_SIZE as i32) as f32 * 16.0;
@@ -82,20 +76,22 @@ fn render_chunks_system(
                 let x = offset_x + (lx as f32) * 16.0;
                 let y = offset_y + (ly as f32) * 16.0;
 
-                let tile_entity = commands.spawn(SpriteBundle {
-                    sprite: Sprite {
-                        color,
-                        custom_size: Some(Vec2::new(16.0, 16.0)),
+                let tile_entity = commands
+                    .spawn(SpriteBundle {
+                        sprite: Sprite {
+                            color,
+                            custom_size: Some(Vec2::new(16.0, 16.0)),
+                            ..default()
+                        },
+                        transform: Transform::from_xyz(x, y, 0.0),
                         ..default()
-                    },
-                    transform: Transform::from_xyz(x, y, 0.0),
-                    ..default()
-                }).id();
-                
+                    })
+                    .id();
+
                 tiles.push(tile_entity);
             }
         }
-        
+
         commands.entity(entity).insert(ChunkVisuals { tiles });
     }
 
