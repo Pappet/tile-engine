@@ -15,8 +15,9 @@ fn main() {
     {
         puffin::set_scopes_on(true);
         let server_addr = format!("0.0.0.0:{}", puffin_http::DEFAULT_PORT);
-        let _server = puffin_http::Server::new(&server_addr).unwrap();
+        let server = puffin_http::Server::new(&server_addr).unwrap();
         eprintln!("Puffin profiler running on {}", server_addr);
+        app.insert_non_send_resource(server);
         app.add_systems(Update, profile_system);
     }
 
