@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/*"
+]
+
+[workspace.dependencies]
+bevy = "0.14.2"
+puffin = "0.19"
+puffin_http = "0.12"
+

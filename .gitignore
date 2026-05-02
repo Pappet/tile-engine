@@ -1,0 +1,17 @@
+# Added by code-review-graph
+.code-review-graph/
+
+# Rust
+/target/
+**/*.rs.bk
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+.claude/
+.gemini/
