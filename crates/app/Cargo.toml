@@ -9,6 +9,8 @@ puffin = { workspace = true, optional = true }
 puffin_http = { workspace = true, optional = true }
 tile_core = { path = "../core" }
 render_bevy = { path = "../render-bevy" }
+worldgen_api = { path = "../worldgen-api" }
+worldgen_earthlike = { path = "../worldgen-earthlike" }
 
 [features]
 profile = ["dep:puffin", "dep:puffin_http"]

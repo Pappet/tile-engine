@@ -23,8 +23,15 @@ fn main() {
 
     app.add_plugins(tile_core::activity::CorePlugin);
     app.add_plugins(render_bevy::RenderPlugin);
+    app.add_plugins(worldgen_earthlike::EarthlikeWorldgenPlugin);
 
     app.init_resource::<tile_core::world::World>();
+    
+    // Configure Worldgen
+    app.insert_resource(worldgen_api::WorldgenConfig {
+        seed: 123456789,
+        bounds_radius: Some(2), // 2x2 chunk bounds radius -> 4x4 chunks (16 chunks)
+    });
     
     // Initialize MaterialRegistry with builtin materials
     let mut material_reg = tile_core::material::MaterialRegistry::default();
@@ -33,8 +40,6 @@ fn main() {
     }
     app.insert_resource(material_reg);
 
-    app.add_systems(PreStartup, demo_ensure_chunks);
-    app.add_systems(Startup, demo_fill_tiles);
     app.add_systems(Update, dummy_system);
 
     app.run();
@@ -51,32 +56,6 @@ fn dummy_system() {
     // Do nothing
 }
 
-fn demo_ensure_chunks(mut access: tile_core::world::WorldAccessMut) {
-    for cy in 0..1 {
-        for cx in 0..2 {
-            let coord = tile_core::coords::ChunkCoord { cx, cy, cz: 0 };
-            access.ensure_chunk(coord);
-        }
-    }
-}
-
-fn demo_fill_tiles(mut access: tile_core::world::WorldAccessMut) {
-    use tile_core::coords::WorldPos;
-    use tile_core::material::MaterialId;
-
-    for cy in 0..1i32 {
-        for cx in 0..2i32 {
-            for ly in 0..tile_core::coords::CHUNK_SIZE {
-                for lx in 0..tile_core::coords::CHUNK_SIZE {
-                    let wx = cx * tile_core::coords::CHUNK_SIZE as i32 + lx as i32;
-                    let wy = cy * tile_core::coords::CHUNK_SIZE as i32 + ly as i32;
-                    let mat = if (wx + wy) % 2 == 0 { MaterialId(1) } else { MaterialId(3) };
-                    access.set_tile(WorldPos { x: wx, y: wy, z: 0 }, tile_core::world::Tile { material: mat });
-                }
-            }
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
