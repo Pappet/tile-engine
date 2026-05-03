@@ -4,6 +4,7 @@ use tile_core::coords::CHUNK_SIZE;
 use tile_core::material::{MAT_AIR, MaterialRegistry};
 
 pub mod camera;
+pub mod debug;
 
 #[derive(Resource, Default)]
 pub struct ActiveZLayer(pub i32);
@@ -17,6 +18,7 @@ pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(debug::DebugUiPlugin);
         app.init_resource::<ActiveZLayer>();
         app.add_systems(Startup, camera::setup_camera);
         app.add_systems(Update, camera::camera_control_system);
