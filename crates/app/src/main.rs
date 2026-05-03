@@ -1,4 +1,9 @@
 use bevy::prelude::*;
+use sim_fluid::{
+    FluidPlugin, LiquidDrain, LiquidFilter, LiquidRegistry, LiquidSource, builtin_liquids,
+};
+use tile_core::coords::WorldPos;
+use tile_core::liquid::LiquidId;
 
 fn main() {
     let mut app = App::new();
@@ -22,6 +27,7 @@ fn main() {
     }
 
     app.add_plugins(tile_core::activity::CorePlugin);
+    app.add_plugins(FluidPlugin);
     app.add_plugins(render_bevy::RenderPlugin);
     app.add_plugins(worldgen_earthlike::EarthlikeWorldgenPlugin);
 
@@ -40,9 +46,62 @@ fn main() {
     }
     app.insert_resource(material_reg);
 
+    // Initialize LiquidRegistry with builtin liquids
+    let mut liquid_reg = LiquidRegistry::default();
+    for (id, props) in builtin_liquids() {
+        liquid_reg.add(id, props);
+    }
+    app.insert_resource(liquid_reg);
+
+    app.add_systems(Startup, spawn_liquid_sources);
     app.add_systems(Update, dummy_system);
 
     app.run();
+}
+
+fn spawn_liquid_sources(mut commands: Commands) {
+    // Magma source — glows, flows slow
+    commands.spawn(LiquidSource {
+        pos: WorldPos {
+            x: 10,
+            y: 10,
+            z: -1,
+        },
+        kind: LiquidId(2), // Magma
+        rate: 3,
+        temperature: 1300,
+        max_pressure: 200,
+    });
+    // Water source
+    commands.spawn(LiquidSource {
+        pos: WorldPos {
+            x: -10,
+            y: 5,
+            z: -1,
+        },
+        kind: LiquidId(1), // Water
+        rate: 5,
+        temperature: 20,
+        max_pressure: 255,
+    });
+    // Oil source
+    commands.spawn(LiquidSource {
+        pos: WorldPos {
+            x: 20,
+            y: -5,
+            z: -1,
+        },
+        kind: LiquidId(4), // Oil
+        rate: 2,
+        temperature: 20,
+        max_pressure: 255,
+    });
+    // Drain to keep world from flooding
+    commands.spawn(LiquidDrain {
+        pos: WorldPos { x: 0, y: 0, z: -1 },
+        rate: 10,
+        accepts: LiquidFilter::All,
+    });
 }
 
 #[cfg(feature = "profile")]
