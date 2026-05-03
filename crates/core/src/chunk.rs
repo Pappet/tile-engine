@@ -1,17 +1,16 @@
+use crate::coords::{CHUNK_AREA, ChunkCoord};
+use crate::liquid::{LIQ_NONE, LiquidId};
+use crate::material::MaterialId;
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
-use crate::coords::{ChunkCoord, CHUNK_AREA};
-use crate::material::{MaterialId, MAT_AIR};
-use crate::liquid::{LiquidId, LIQ_NONE};
 
 // ── Default-value helpers for #[serde(skip, default = "...")] ───────────────
 
-fn default_terrain_box() -> Box<[MaterialId; CHUNK_AREA]> {
-    vec![MAT_AIR; CHUNK_AREA].into_boxed_slice().try_into().unwrap()
-}
-
 fn default_zero_i16_box() -> Box<[i16; CHUNK_AREA]> {
-    vec![0i16; CHUNK_AREA].into_boxed_slice().try_into().unwrap()
+    vec![0i16; CHUNK_AREA]
+        .into_boxed_slice()
+        .try_into()
+        .unwrap()
 }
 
 fn default_zero_u8_box() -> Box<[u8; CHUNK_AREA]> {
@@ -19,7 +18,10 @@ fn default_zero_u8_box() -> Box<[u8; CHUNK_AREA]> {
 }
 
 fn default_liquid_kind_box() -> Box<[LiquidId; CHUNK_AREA]> {
-    vec![LIQ_NONE; CHUNK_AREA].into_boxed_slice().try_into().unwrap()
+    vec![LIQ_NONE; CHUNK_AREA]
+        .into_boxed_slice()
+        .try_into()
+        .unwrap()
 }
 
 // ── Custom serde for Box<[T; CHUNK_AREA]> via Vec round-trip ────────────────
@@ -27,26 +29,40 @@ fn default_liquid_kind_box() -> Box<[LiquidId; CHUNK_AREA]> {
 mod box_array_material {
     use super::*;
     use serde::{Deserializer, Serializer};
-    pub fn serialize<S: Serializer>(data: &Box<[MaterialId; CHUNK_AREA]>, s: S) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(
+        data: &Box<[MaterialId; CHUNK_AREA]>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
         let slice: &[MaterialId] = &**data;
         serde::Serialize::serialize(slice, s)
     }
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Box<[MaterialId; CHUNK_AREA]>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Box<[MaterialId; CHUNK_AREA]>, D::Error> {
         let v: Vec<MaterialId> = Vec::deserialize(d)?;
-        v.into_boxed_slice().try_into().map_err(|_| serde::de::Error::custom("bad chunk len"))
+        v.into_boxed_slice()
+            .try_into()
+            .map_err(|_| serde::de::Error::custom("bad chunk len"))
     }
 }
 
 mod box_array_i16 {
     use super::*;
     use serde::{Deserializer, Serializer};
-    pub fn serialize<S: Serializer>(data: &Box<[i16; CHUNK_AREA]>, s: S) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(
+        data: &Box<[i16; CHUNK_AREA]>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
         let slice: &[i16] = &**data;
         serde::Serialize::serialize(slice, s)
     }
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Box<[i16; CHUNK_AREA]>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Box<[i16; CHUNK_AREA]>, D::Error> {
         let v: Vec<i16> = Vec::deserialize(d)?;
-        v.into_boxed_slice().try_into().map_err(|_| serde::de::Error::custom("bad chunk len"))
+        v.into_boxed_slice()
+            .try_into()
+            .map_err(|_| serde::de::Error::custom("bad chunk len"))
     }
 }
 
@@ -59,20 +75,29 @@ mod box_array_u8 {
     }
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Box<[u8; CHUNK_AREA]>, D::Error> {
         let v: Vec<u8> = serde::Deserialize::deserialize(d)?;
-        v.into_boxed_slice().try_into().map_err(|_| serde::de::Error::custom("bad chunk len"))
+        v.into_boxed_slice()
+            .try_into()
+            .map_err(|_| serde::de::Error::custom("bad chunk len"))
     }
 }
 
 mod box_array_liquid {
     use super::*;
     use serde::{Deserializer, Serializer};
-    pub fn serialize<S: Serializer>(data: &Box<[LiquidId; CHUNK_AREA]>, s: S) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(
+        data: &Box<[LiquidId; CHUNK_AREA]>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
         let slice: &[LiquidId] = &**data;
         serde::Serialize::serialize(slice, s)
     }
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Box<[LiquidId; CHUNK_AREA]>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Box<[LiquidId; CHUNK_AREA]>, D::Error> {
         let v: Vec<LiquidId> = Vec::deserialize(d)?;
-        v.into_boxed_slice().try_into().map_err(|_| serde::de::Error::custom("bad chunk len"))
+        v.into_boxed_slice()
+            .try_into()
+            .map_err(|_| serde::de::Error::custom("bad chunk len"))
     }
 }
 
@@ -129,7 +154,10 @@ impl ChunkData {
     pub fn new_filled(coord: ChunkCoord, material: MaterialId) -> Self {
         Self {
             coord,
-            terrain: vec![material; CHUNK_AREA].into_boxed_slice().try_into().unwrap(),
+            terrain: vec![material; CHUNK_AREA]
+                .into_boxed_slice()
+                .try_into()
+                .unwrap(),
             temp: default_zero_i16_box(),
             liquid_kind: default_liquid_kind_box(),
             liquid_amount_read: default_zero_u8_box(),
@@ -175,7 +203,11 @@ mod tests {
 
     #[test]
     fn chunk_data_allocation() {
-        let coord = ChunkCoord { cx: 0, cy: 0, cz: 0 };
+        let coord = ChunkCoord {
+            cx: 0,
+            cy: 0,
+            cz: 0,
+        };
         let chunk = ChunkData::new_filled(coord, MAT_AIR);
 
         assert_eq!(chunk.coord, coord);
@@ -186,7 +218,11 @@ mod tests {
 
     #[test]
     fn test_chunk_data_serde_roundtrip() {
-        let coord = ChunkCoord { cx: 1, cy: -1, cz: 2 };
+        let coord = ChunkCoord {
+            cx: 1,
+            cy: -1,
+            cz: 2,
+        };
         let mut chunk = ChunkData::new_filled(coord, MAT_AIR);
 
         // Set read buffer values
@@ -211,7 +247,11 @@ mod tests {
 
     #[test]
     fn test_swap_buffers() {
-        let coord = ChunkCoord { cx: 0, cy: 0, cz: 0 };
+        let coord = ChunkCoord {
+            cx: 0,
+            cy: 0,
+            cz: 0,
+        };
         let mut chunk = ChunkData::new_filled(coord, MAT_AIR);
 
         chunk.liquid_amount_write[0] = 100;

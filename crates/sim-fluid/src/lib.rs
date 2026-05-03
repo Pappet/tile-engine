@@ -1,22 +1,33 @@
 pub mod fluid_ca;
+pub mod snapshot;
 
 use bevy_ecs::prelude::Resource;
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+pub use tile_core::liquid::{GasId, LIQ_NONE, LiquidId};
 use tile_core::material::MaterialId;
-pub use tile_core::liquid::{LiquidId, GasId, LIQ_NONE};
 
-/// Bevy plugin that registers the single-chunk fluid simulation systems.
+pub use snapshot::LiquidSnapshot;
+
+/// Bevy plugin for fluid simulation.
+/// System order: snapshot_liquid → fluid_step_local → swap_buffers_system.
 pub struct FluidPlugin;
 
 impl bevy_app::Plugin for FluidPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         use bevy_ecs::schedule::IntoSystemConfigs;
-        app.add_systems(bevy_app::Update, (
-            fluid_ca::fluid_step_local,
-            fluid_ca::swap_buffers_system,
-        ).chain());
+        app.init_resource::<snapshot::LiquidSnapshot>();
+        app.init_resource::<tile_core::activity::WakeRequests>();
+        app.add_systems(
+            bevy_app::Update,
+            (
+                snapshot::snapshot_liquid,
+                fluid_ca::fluid_step_local,
+                fluid_ca::swap_buffers_system,
+            )
+                .chain(),
+        );
     }
 }
 
@@ -66,81 +77,96 @@ impl LiquidRegistry {
 
 pub fn builtin_liquids() -> Vec<(LiquidId, LiquidProperties)> {
     vec![
-        (LiquidId(1), LiquidProperties {
-            name: "Water".to_string(),
-            density: 1.0,
-            viscosity: 10,
-            freeze_point: 0,
-            boil_point: 100,
-            freezes_to: MaterialId(4), // Eis is usually MaterialId(4) in our setup
-            boils_to: GasId(1), // Steam stub
-            damages_living: 0,
-            corrosion: 0,
-            ignites_flammable: false,
-            color: [0, 0, 255, 200],
-            emits_light: 0,
-            flags: LiquidFlags::POTABLE | LiquidFlags::EVAPORATES,
-        }),
-        (LiquidId(2), LiquidProperties {
-            name: "Magma".to_string(),
-            density: 2.5,
-            viscosity: 200,
-            freeze_point: 1200,
-            boil_point: 3000,
-            freezes_to: MaterialId(5), // Basalt
-            boils_to: GasId(0), // None
-            damages_living: 255,
-            corrosion: 50,
-            ignites_flammable: true,
-            color: [255, 50, 0, 255],
-            emits_light: 15,
-            flags: LiquidFlags::empty(),
-        }),
-        (LiquidId(3), LiquidProperties {
-            name: "Blood".to_string(),
-            density: 1.06,
-            viscosity: 80,
-            freeze_point: -2,
-            boil_point: 100,
-            freezes_to: MaterialId(0), // None
-            boils_to: GasId(1), // Steam
-            damages_living: 0,
-            corrosion: 0,
-            ignites_flammable: false,
-            color: [150, 0, 0, 255],
-            emits_light: 0,
-            flags: LiquidFlags::SACRED | LiquidFlags::STAINS,
-        }),
-        (LiquidId(4), LiquidProperties {
-            name: "Oil".to_string(),
-            density: 0.85,
-            viscosity: 40,
-            freeze_point: -40,
-            boil_point: 300,
-            freezes_to: MaterialId(0),
-            boils_to: GasId(0),
-            damages_living: 10,
-            corrosion: 0,
-            ignites_flammable: true, // actually it IS flammable, so doesn't instantly ignite others unless burning, but for struct properties it fits
-            color: [50, 50, 50, 255],
-            emits_light: 0,
-            flags: LiquidFlags::STAINS,
-        }),
-        (LiquidId(5), LiquidProperties {
-            name: "Acid".to_string(),
-            density: 1.20,
-            viscosity: 15,
-            freeze_point: -50,
-            boil_point: 120,
-            freezes_to: MaterialId(0),
-            boils_to: GasId(0),
-            damages_living: 100,
-            corrosion: 200,
-            ignites_flammable: false,
-            color: [0, 255, 0, 200],
-            emits_light: 5,
-            flags: LiquidFlags::CONDUCTIVE,
-        }),
+        (
+            LiquidId(1),
+            LiquidProperties {
+                name: "Water".to_string(),
+                density: 1.0,
+                viscosity: 10,
+                freeze_point: 0,
+                boil_point: 100,
+                freezes_to: MaterialId(4), // Eis is usually MaterialId(4) in our setup
+                boils_to: GasId(1),        // Steam stub
+                damages_living: 0,
+                corrosion: 0,
+                ignites_flammable: false,
+                color: [0, 0, 255, 200],
+                emits_light: 0,
+                flags: LiquidFlags::POTABLE | LiquidFlags::EVAPORATES,
+            },
+        ),
+        (
+            LiquidId(2),
+            LiquidProperties {
+                name: "Magma".to_string(),
+                density: 2.5,
+                viscosity: 200,
+                freeze_point: 1200,
+                boil_point: 3000,
+                freezes_to: MaterialId(5), // Basalt
+                boils_to: GasId(0),        // None
+                damages_living: 255,
+                corrosion: 50,
+                ignites_flammable: true,
+                color: [255, 50, 0, 255],
+                emits_light: 15,
+                flags: LiquidFlags::empty(),
+            },
+        ),
+        (
+            LiquidId(3),
+            LiquidProperties {
+                name: "Blood".to_string(),
+                density: 1.06,
+                viscosity: 80,
+                freeze_point: -2,
+                boil_point: 100,
+                freezes_to: MaterialId(0), // None
+                boils_to: GasId(1),        // Steam
+                damages_living: 0,
+                corrosion: 0,
+                ignites_flammable: false,
+                color: [150, 0, 0, 255],
+                emits_light: 0,
+                flags: LiquidFlags::SACRED | LiquidFlags::STAINS,
+            },
+        ),
+        (
+            LiquidId(4),
+            LiquidProperties {
+                name: "Oil".to_string(),
+                density: 0.85,
+                viscosity: 40,
+                freeze_point: -40,
+                boil_point: 300,
+                freezes_to: MaterialId(0),
+                boils_to: GasId(0),
+                damages_living: 10,
+                corrosion: 0,
+                ignites_flammable: true, // actually it IS flammable, so doesn't instantly ignite others unless burning, but for struct properties it fits
+                color: [50, 50, 50, 255],
+                emits_light: 0,
+                flags: LiquidFlags::STAINS,
+            },
+        ),
+        (
+            LiquidId(5),
+            LiquidProperties {
+                name: "Acid".to_string(),
+                density: 1.20,
+                viscosity: 15,
+                freeze_point: -50,
+                boil_point: 120,
+                freezes_to: MaterialId(0),
+                boils_to: GasId(0),
+                damages_living: 100,
+                corrosion: 200,
+                ignites_flammable: false,
+                color: [0, 255, 0, 200],
+                emits_light: 5,
+                flags: LiquidFlags::CONDUCTIVE,
+            },
+        ),
     ]
 }
 
