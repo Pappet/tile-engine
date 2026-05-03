@@ -134,8 +134,8 @@ fn density(reg: &Option<Res<LiquidRegistry>>, id: LiquidId) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::snapshot::snapshot_liquid;
     use crate::builtin_liquids;
+    use crate::snapshot::snapshot_liquid;
     use bevy_app::prelude::*;
     use bevy_ecs::schedule::IntoSystemConfigs;
     use tile_core::coords::ChunkCoord;
