@@ -116,6 +116,8 @@ pub struct ChunkData {
     // ── Fluid fields (read = authoritative, write = derived buffer) ─────
     #[serde(with = "box_array_liquid")]
     pub liquid_kind: Box<[LiquidId; CHUNK_AREA]>,
+    #[serde(skip, default = "default_liquid_kind_box")]
+    pub liquid_kind_write: Box<[LiquidId; CHUNK_AREA]>,
 
     #[serde(with = "box_array_u8")]
     pub liquid_amount_read: Box<[u8; CHUNK_AREA]>,
@@ -157,6 +159,7 @@ impl ChunkData {
                 .unwrap(),
             temp: default_zero_i16_box(),
             liquid_kind: default_liquid_kind_box(),
+            liquid_kind_write: default_liquid_kind_box(),
             liquid_amount_read: default_zero_u8_box(),
             liquid_amount_write: default_zero_u8_box(),
             liquid_temp_read: default_zero_i16_box(),
@@ -172,6 +175,7 @@ impl ChunkData {
     /// Swap read ↔ write buffers for all double-buffered fluid fields.
     /// Called once per tick in PostTick.
     pub fn swap_buffers(&mut self) {
+        std::mem::swap(&mut self.liquid_kind, &mut self.liquid_kind_write);
         std::mem::swap(&mut self.liquid_amount_read, &mut self.liquid_amount_write);
         std::mem::swap(&mut self.liquid_temp_read, &mut self.liquid_temp_write);
         std::mem::swap(&mut self.pressure_read, &mut self.pressure_write);
