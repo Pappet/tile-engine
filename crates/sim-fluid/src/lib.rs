@@ -1,4 +1,5 @@
 pub mod fluid_ca;
+pub mod snapshot;
 
 use bevy_ecs::prelude::Resource;
 use bitflags::bitflags;
@@ -7,15 +8,25 @@ use std::collections::HashMap;
 pub use tile_core::liquid::{GasId, LIQ_NONE, LiquidId};
 use tile_core::material::MaterialId;
 
-/// Bevy plugin that registers the single-chunk fluid simulation systems.
+pub use snapshot::LiquidSnapshot;
+
+/// Bevy plugin for fluid simulation.
+/// System order: snapshot_liquid → fluid_step_local → swap_buffers_system.
 pub struct FluidPlugin;
 
 impl bevy_app::Plugin for FluidPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         use bevy_ecs::schedule::IntoSystemConfigs;
+        app.init_resource::<snapshot::LiquidSnapshot>();
+        app.init_resource::<tile_core::activity::WakeRequests>();
         app.add_systems(
             bevy_app::Update,
-            (fluid_ca::fluid_step_local, fluid_ca::swap_buffers_system).chain(),
+            (
+                snapshot::snapshot_liquid,
+                fluid_ca::fluid_step_local,
+                fluid_ca::swap_buffers_system,
+            )
+                .chain(),
         );
     }
 }
