@@ -1,5 +1,6 @@
 pub mod fluid_ca;
 pub mod snapshot;
+pub mod source_drain;
 pub mod vertical_flow;
 
 use bevy_ecs::prelude::Resource;
@@ -10,9 +11,10 @@ pub use tile_core::liquid::{GasId, LIQ_NONE, LiquidId};
 use tile_core::material::MaterialId;
 
 pub use snapshot::LiquidSnapshot;
+pub use source_drain::{LiquidDrain, LiquidFilter, LiquidSource};
 
 /// Bevy plugin for fluid simulation.
-/// System order (Bibel §9.12): snapshot → horizontal → vertical → swap.
+/// System order (Bibel §9.12): sources/drains → snapshot → horizontal → vertical → swap.
 pub struct FluidPlugin;
 
 impl bevy_app::Plugin for FluidPlugin {
@@ -23,6 +25,7 @@ impl bevy_app::Plugin for FluidPlugin {
         app.add_systems(
             bevy_app::Update,
             (
+                source_drain::run_sources_drains,
                 snapshot::snapshot_liquid,
                 fluid_ca::fluid_step_local,
                 vertical_flow::liquid_vertical_flow,
