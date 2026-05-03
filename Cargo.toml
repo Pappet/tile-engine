@@ -6,6 +6,7 @@ members = [
 
 [workspace.dependencies]
 bevy = "0.14.2"
+bevy_egui = "0.28"
 puffin = "0.19"
 puffin_http = "0.12"
 
