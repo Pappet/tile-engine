@@ -1,5 +1,6 @@
 pub mod fluid_ca;
 pub mod snapshot;
+pub mod vertical_flow;
 
 use bevy_ecs::prelude::Resource;
 use bitflags::bitflags;
@@ -11,7 +12,7 @@ use tile_core::material::MaterialId;
 pub use snapshot::LiquidSnapshot;
 
 /// Bevy plugin for fluid simulation.
-/// System order: snapshot_liquid → fluid_step_local → swap_buffers_system.
+/// System order (Bibel §9.12): snapshot → horizontal → vertical → swap.
 pub struct FluidPlugin;
 
 impl bevy_app::Plugin for FluidPlugin {
@@ -24,6 +25,7 @@ impl bevy_app::Plugin for FluidPlugin {
             (
                 snapshot::snapshot_liquid,
                 fluid_ca::fluid_step_local,
+                vertical_flow::liquid_vertical_flow,
                 fluid_ca::swap_buffers_system,
             )
                 .chain(),
