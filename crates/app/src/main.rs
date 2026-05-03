@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use sim_fluid::{FluidPlugin, LiquidRegistry, LiquidSource, builtin_liquids};
+use tile_core::chunk::ChunkData;
 use tile_core::coords::WorldPos;
 use tile_core::liquid::LiquidId;
+use tile_core::material::MAT_AIR;
 
 fn main() {
     let mut app = App::new();
@@ -52,6 +54,7 @@ fn main() {
     app.insert_resource(liquid_reg);
 
     app.add_systems(Startup, spawn_liquid_sources);
+    app.add_systems(PostStartup, clear_source_terrain);
     app.add_systems(Update, dummy_system);
 
     app.run();
@@ -93,6 +96,20 @@ fn spawn_liquid_sources(mut commands: Commands) {
         temperature: 20,
         max_pressure: 255,
     });
+}
+
+/// Force-clear terrain at every LiquidSource position so sources are never blocked by worldgen.
+fn clear_source_terrain(
+    sources: Query<&LiquidSource>,
+    mut chunks: Query<&mut ChunkData>,
+) {
+    for source in sources.iter() {
+        let (coord, lp) = source.pos.split();
+        let idx = lp.index();
+        if let Some(mut chunk) = chunks.iter_mut().find(|c| c.coord == coord) {
+            chunk.terrain[idx] = MAT_AIR;
+        }
+    }
 }
 
 #[cfg(feature = "profile")]
