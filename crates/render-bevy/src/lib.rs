@@ -8,8 +8,14 @@ use tile_core::material::{MAT_AIR, MaterialRegistry};
 pub mod camera;
 pub mod debug;
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct ActiveZLayer(pub i32);
+
+impl Default for ActiveZLayer {
+    fn default() -> Self {
+        Self(2) // Start at z=2: top worldgen layer, mostly air, liquids spawn here
+    }
+}
 
 #[derive(Component)]
 pub struct ChunkVisuals {

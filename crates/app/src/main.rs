@@ -1,7 +1,5 @@
 use bevy::prelude::*;
-use sim_fluid::{
-    FluidPlugin, LiquidDrain, LiquidFilter, LiquidRegistry, LiquidSource, builtin_liquids,
-};
+use sim_fluid::{FluidPlugin, LiquidRegistry, LiquidSource, builtin_liquids};
 use tile_core::coords::WorldPos;
 use tile_core::liquid::LiquidId;
 
@@ -60,47 +58,40 @@ fn main() {
 }
 
 fn spawn_liquid_sources(mut commands: Commands) {
-    // Magma source — glows, flows slow
+    // Z=2: top worldgen layer — mostly air (only noise peaks are solid here).
+    // Sources at spread-out positions to reduce interference.
+
+    // Magma source — glows orange, flows slow (visc=200)
     commands.spawn(LiquidSource {
-        pos: WorldPos {
-            x: 10,
-            y: 10,
-            z: -1,
-        },
+        pos: WorldPos { x: 5, y: 5, z: 2 },
         kind: LiquidId(2), // Magma
-        rate: 3,
+        rate: 5,
         temperature: 1300,
         max_pressure: 200,
     });
-    // Water source
+    // Water source — fast flow (visc=10)
     commands.spawn(LiquidSource {
         pos: WorldPos {
-            x: -10,
-            y: 5,
-            z: -1,
+            x: -20,
+            y: -20,
+            z: 2,
         },
         kind: LiquidId(1), // Water
         rate: 5,
         temperature: 20,
         max_pressure: 255,
     });
-    // Oil source
+    // Oil source — medium flow (visc=40)
     commands.spawn(LiquidSource {
         pos: WorldPos {
-            x: 20,
-            y: -5,
-            z: -1,
+            x: 30,
+            y: -15,
+            z: 2,
         },
         kind: LiquidId(4), // Oil
-        rate: 2,
+        rate: 5,
         temperature: 20,
         max_pressure: 255,
-    });
-    // Drain to keep world from flooding
-    commands.spawn(LiquidDrain {
-        pos: WorldPos { x: 0, y: 0, z: -1 },
-        rate: 10,
-        accepts: LiquidFilter::All,
     });
 }
 
