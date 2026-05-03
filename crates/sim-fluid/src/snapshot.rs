@@ -22,7 +22,7 @@ impl LiquidSnapshot {
     pub fn is_passable(&self, coord: ChunkCoord, local_idx: usize) -> bool {
         self.terrain
             .get(&coord)
-            .map_or(false, |t| t[local_idx] == MAT_AIR)
+            .is_some_and(|t| t[local_idx] == MAT_AIR)
     }
 
     /// True if any of the 4 horizontal neighbor chunks exist in the snapshot.

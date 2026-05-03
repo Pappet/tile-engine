@@ -176,6 +176,7 @@ fn apply_intra(
 }
 
 /// Modifies only OUR tile's delta. Neighbor handles its side symmetrically.
+#[allow(clippy::too_many_arguments)]
 #[inline]
 fn apply_cross(
     our_idx: usize,
