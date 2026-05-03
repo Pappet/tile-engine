@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 use tile_core::activity::WakeRequests;
 use tile_core::chunk::ChunkData;
 use tile_core::coords::{CHUNK_AREA, CHUNK_SIZE, ChunkCoord};
-use tile_core::liquid::LiquidId;
+use tile_core::liquid::{LIQ_NONE, LiquidId};
 use tile_core::material::MAT_AIR;
 
 use crate::LiquidRegistry;
@@ -314,6 +314,97 @@ pub fn fluid_step_local(
             if d != 0 {
                 let v = (chunk.liquid_amount_write[i] as i16) + d;
                 chunk.liquid_amount_write[i] = v.clamp(0, 255) as u8;
+            }
+        }
+
+        // ── Propagate liquid_kind to newly-wet tiles ───────────────────────
+        // Horizontal flow moves amounts but not kinds. Any tile that now has
+        // amount > 0 but kind == LIQ_NONE inherited liquid from a neighbor —
+        // find that neighbor's kind and assign it.
+        let current_kinds: [LiquidId; CHUNK_AREA] = {
+            let mut k = [LIQ_NONE; CHUNK_AREA];
+            k.copy_from_slice(&*chunk.liquid_kind);
+            k
+        };
+        chunk.liquid_kind_write.copy_from_slice(&current_kinds);
+        for i in 0..CHUNK_AREA {
+            if chunk.liquid_amount_write[i] == 0 {
+                chunk.liquid_kind_write[i] = LIQ_NONE;
+                continue;
+            }
+            if chunk.liquid_kind_write[i] != LIQ_NONE {
+                continue;
+            }
+            let x = i % CHUNK_SIZE;
+            let y = i / CHUNK_SIZE;
+
+            let kind = [
+                if x > 0 { Some(i - 1) } else { None },
+                if x + 1 < CHUNK_SIZE {
+                    Some(i + 1)
+                } else {
+                    None
+                },
+                if y > 0 { Some(i - CHUNK_SIZE) } else { None },
+                if y + 1 < CHUNK_SIZE {
+                    Some(i + CHUNK_SIZE)
+                } else {
+                    None
+                },
+            ]
+            .into_iter()
+            .flatten()
+            .find_map(|nb| {
+                let k = current_kinds[nb];
+                if k != LIQ_NONE { Some(k) } else { None }
+            })
+            .or_else(|| {
+                // Edge tiles: check cross-chunk snapshot
+                let edge_neighbors = [
+                    (
+                        x == 0,
+                        y * CHUNK_SIZE + (CHUNK_SIZE - 1),
+                        ChunkCoord {
+                            cx: coord.cx - 1,
+                            ..coord
+                        },
+                    ),
+                    (
+                        x == CHUNK_SIZE - 1,
+                        y * CHUNK_SIZE,
+                        ChunkCoord {
+                            cx: coord.cx + 1,
+                            ..coord
+                        },
+                    ),
+                    (
+                        y == 0,
+                        (CHUNK_SIZE - 1) * CHUNK_SIZE + x,
+                        ChunkCoord {
+                            cy: coord.cy - 1,
+                            ..coord
+                        },
+                    ),
+                    (
+                        y == CHUNK_SIZE - 1,
+                        x,
+                        ChunkCoord {
+                            cy: coord.cy + 1,
+                            ..coord
+                        },
+                    ),
+                ];
+                edge_neighbors
+                    .into_iter()
+                    .filter(|(on_edge, _, _)| *on_edge)
+                    .find_map(|(_, nb_idx, nb_coord)| {
+                        let k = snapshot.get_kind(nb_coord, nb_idx);
+                        if k != LIQ_NONE { Some(k) } else { None }
+                    })
+            });
+
+            if let Some(k) = kind {
+                chunk.liquid_kind_write[i] = k;
             }
         }
     }
