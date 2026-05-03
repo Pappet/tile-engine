@@ -24,6 +24,7 @@ impl bevy_app::Plugin for FluidPlugin {
             bevy_app::Update,
             (
                 snapshot::snapshot_liquid,
+                fluid_ca::pressure_propagation,
                 fluid_ca::fluid_step_local,
                 vertical_flow::liquid_vertical_flow,
                 fluid_ca::swap_buffers_system,

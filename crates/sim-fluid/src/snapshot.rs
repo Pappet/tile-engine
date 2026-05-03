@@ -14,6 +14,7 @@ pub struct LiquidSnapshot {
     amounts: HashMap<ChunkCoord, Box<[u8; CHUNK_AREA]>>,
     kinds: HashMap<ChunkCoord, Box<[LiquidId; CHUNK_AREA]>>,
     terrain: HashMap<ChunkCoord, Box<[MaterialId; CHUNK_AREA]>>,
+    pressures: HashMap<ChunkCoord, Box<[u8; CHUNK_AREA]>>,
 }
 
 impl LiquidSnapshot {
@@ -23,6 +24,10 @@ impl LiquidSnapshot {
 
     pub fn get_kind(&self, coord: ChunkCoord, local_idx: usize) -> LiquidId {
         self.kinds.get(&coord).map_or(LIQ_NONE, |k| k[local_idx])
+    }
+
+    pub fn get_pressure(&self, coord: ChunkCoord, local_idx: usize) -> u8 {
+        self.pressures.get(&coord).map_or(0, |p| p[local_idx])
     }
 
     pub fn is_passable(&self, coord: ChunkCoord, local_idx: usize) -> bool {
@@ -81,6 +86,7 @@ pub fn snapshot_liquid(mut snapshot: ResMut<LiquidSnapshot>, chunks: Query<&Chun
     snapshot.amounts.clear();
     snapshot.kinds.clear();
     snapshot.terrain.clear();
+    snapshot.pressures.clear();
     for chunk in chunks.iter() {
         let mut amounts = Box::new([0u8; CHUNK_AREA]);
         amounts.copy_from_slice(&*chunk.liquid_amount_read);
@@ -93,5 +99,9 @@ pub fn snapshot_liquid(mut snapshot: ResMut<LiquidSnapshot>, chunks: Query<&Chun
         let mut terrain = Box::new([MAT_AIR; CHUNK_AREA]);
         terrain.copy_from_slice(&*chunk.terrain);
         snapshot.terrain.insert(chunk.coord, terrain);
+
+        let mut pressures = Box::new([0u8; CHUNK_AREA]);
+        pressures.copy_from_slice(&*chunk.pressure_read);
+        snapshot.pressures.insert(chunk.coord, pressures);
     }
 }
