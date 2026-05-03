@@ -35,7 +35,7 @@ impl LiquidSnapshot {
     pub fn chunk_has_liquid(&self, coord: ChunkCoord) -> bool {
         self.amounts
             .get(&coord)
-            .map_or(false, |a| a.iter().any(|&v| v > 0))
+            .is_some_and(|a| a.iter().any(|&v| v > 0))
     }
 
     /// True if any of the 4 horizontal neighbor chunks exist in the snapshot.
