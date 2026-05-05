@@ -7,3 +7,6 @@ edition = "2024"
 bincode = "1.3.3"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
+tile_core = { path = "../core" }
+bevy_ecs = "0.14.2"
+bevy_app = "0.14.2"

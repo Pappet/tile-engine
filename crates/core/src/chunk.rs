@@ -102,7 +102,7 @@ mod box_array_liquid {
 
 /// The data for a single chunk of tiles (32×32 = 1024 tiles).
 /// Uses SoA layout with double-buffered fields for simulation.
-#[derive(Component, Serialize, Deserialize)]
+#[derive(Component, Clone, Serialize, Deserialize)]
 pub struct ChunkData {
     pub coord: ChunkCoord,
 
