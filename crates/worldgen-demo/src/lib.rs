@@ -69,9 +69,7 @@ fn gen_demo_chunks(
                         let wy = cy * CHUNK_SIZE as i32 + ly as i32;
                         let idx = ly * CHUNK_SIZE + lx;
 
-                        if cz == FLOOR_Z {
-                            chunk.terrain[idx] = GRANIT;
-                        } else if cz == DEMO_Z && is_demo_wall(wx, wy) {
+                        if cz == FLOOR_Z || (cz == DEMO_Z && is_demo_wall(wx, wy)) {
                             chunk.terrain[idx] = GRANIT;
                         }
                     }
