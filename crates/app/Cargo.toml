@@ -12,6 +12,7 @@ render_bevy = { path = "../render-bevy" }
 sim_fluid = { path = "../sim-fluid" }
 worldgen_api = { path = "../worldgen-api" }
 worldgen_earthlike = { path = "../worldgen-earthlike" }
+worldgen_demo = { path = "../worldgen-demo" }
 
 [features]
 profile = ["dep:puffin", "dep:puffin_http"]

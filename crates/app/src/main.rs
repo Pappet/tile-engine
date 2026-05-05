@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use sim_fluid::{FluidPlugin, LiquidRegistry, LiquidSource, builtin_liquids};
 use tile_core::chunk::ChunkData;
-use tile_core::coords::WorldPos;
 use tile_core::liquid::LiquidId;
 use tile_core::material::MAT_AIR;
 
@@ -29,7 +28,7 @@ fn main() {
     app.add_plugins(tile_core::activity::CorePlugin);
     app.add_plugins(FluidPlugin);
     app.add_plugins(render_bevy::RenderPlugin);
-    app.add_plugins(worldgen_earthlike::EarthlikeWorldgenPlugin);
+    app.add_plugins(worldgen_demo::DemoWorldgenPlugin);
 
     app.init_resource::<tile_core::world::World>();
 
@@ -61,37 +60,26 @@ fn main() {
 }
 
 fn spawn_liquid_sources(mut commands: Commands) {
-    // Z=2: top worldgen layer — mostly air (only noise peaks are solid here).
-    // Sources at spread-out positions to reduce interference.
+    // Demo basins: left=Magma, middle=Water, right=Oil.
+    let [magma_pos, water_pos, oil_pos] = worldgen_demo::demo_source_positions();
 
-    // Magma source — glows orange, flows slow (visc=200)
     commands.spawn(LiquidSource {
-        pos: WorldPos { x: 5, y: 5, z: 2 },
-        kind: LiquidId(2), // Magma
+        pos: magma_pos,
+        kind: LiquidId(2), // Magma — visc=200, glows
         rate: 5,
         temperature: 1300,
         max_pressure: 200,
     });
-    // Water source — fast flow (visc=10)
     commands.spawn(LiquidSource {
-        pos: WorldPos {
-            x: -20,
-            y: -20,
-            z: 2,
-        },
-        kind: LiquidId(1), // Water
+        pos: water_pos,
+        kind: LiquidId(1), // Water — visc=10
         rate: 5,
         temperature: 20,
         max_pressure: 255,
     });
-    // Oil source — medium flow (visc=40)
     commands.spawn(LiquidSource {
-        pos: WorldPos {
-            x: 30,
-            y: -15,
-            z: 2,
-        },
-        kind: LiquidId(4), // Oil
+        pos: oil_pos,
+        kind: LiquidId(4), // Oil — visc=40
         rate: 5,
         temperature: 20,
         max_pressure: 255,
