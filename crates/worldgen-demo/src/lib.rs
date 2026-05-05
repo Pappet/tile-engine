@@ -95,9 +95,7 @@ fn is_demo_wall(wx: i32, wy: i32) -> bool {
         return true;
     }
     // Inner dividing walls (shorter — liquid spills over when basin full).
-    if (wx == INNER_LEFT_X || wx == INNER_RIGHT_X)
-        && (FLOOR_Y..=INNER_WALL_TOP_Y).contains(&wy)
-    {
+    if (wx == INNER_LEFT_X || wx == INNER_RIGHT_X) && (FLOOR_Y..=INNER_WALL_TOP_Y).contains(&wy) {
         return true;
     }
     false

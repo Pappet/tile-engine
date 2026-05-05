@@ -87,10 +87,7 @@ fn spawn_liquid_sources(mut commands: Commands) {
 }
 
 /// Force-clear terrain at every LiquidSource position so sources are never blocked by worldgen.
-fn clear_source_terrain(
-    sources: Query<&LiquidSource>,
-    mut chunks: Query<&mut ChunkData>,
-) {
+fn clear_source_terrain(sources: Query<&LiquidSource>, mut chunks: Query<&mut ChunkData>) {
     for source in sources.iter() {
         let (coord, lp) = source.pos.split();
         let idx = lp.index();

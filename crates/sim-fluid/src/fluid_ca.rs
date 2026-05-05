@@ -501,9 +501,7 @@ pub fn init_fluid_write_buffers(mut chunks: Query<&mut ChunkData>) {
         chunk
             .liquid_amount_write
             .copy_from_slice(&*chunk.liquid_amount_read);
-        chunk
-            .liquid_kind_write
-            .copy_from_slice(&*chunk.liquid_kind);
+        chunk.liquid_kind_write.copy_from_slice(&*chunk.liquid_kind);
     }
 }
 
