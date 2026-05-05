@@ -166,10 +166,10 @@ fn handle_load_requests(
                 world.current_tick = world_save.current_tick;
                 for loaded in loaded_chunks {
                     let coord = loaded.coord;
-                    if let Some(&entity) = world.chunks.get(&coord) {
-                        if let Ok(mut chunk) = chunks.get_mut(entity) {
-                            *chunk = loaded;
-                        }
+                    if let Some(&entity) = world.chunks.get(&coord)
+                        && let Ok(mut chunk) = chunks.get_mut(entity)
+                    {
+                        *chunk = loaded;
                     }
                 }
                 eprintln!("[persistence] loaded from {}", req.slot);
