@@ -26,6 +26,10 @@ pub enum LiquidFilter {
     ByFlags(LiquidFlags),
 }
 
+impl persistence::Persistent for LiquidSource {
+    const TYPE_ID: u32 = 1;
+}
+
 /// Bibel §9.8 — removes liquid from a tile each tick (rate units, floor 0).
 #[derive(Component, Debug, Clone, Serialize, Deserialize)]
 pub struct LiquidDrain {
@@ -33,6 +37,10 @@ pub struct LiquidDrain {
     /// Units removed per tick.
     pub rate: u8,
     pub accepts: LiquidFilter,
+}
+
+impl persistence::Persistent for LiquidDrain {
+    const TYPE_ID: u32 = 2;
 }
 
 /// PreTick system — runs before `snapshot_liquid`.

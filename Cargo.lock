@@ -181,6 +181,7 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "persistence",
  "puffin 0.19.1",
  "puffin_http",
  "render_bevy",
@@ -3486,6 +3487,14 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "persistence"
 version = "0.1.0"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bincode",
+ "serde",
+ "thiserror 1.0.69",
+ "tile_core",
+]
 
 [[package]]
 name = "petgraph"
@@ -4147,6 +4156,7 @@ dependencies = [
  "bevy_ecs",
  "bincode",
  "bitflags 2.11.1",
+ "persistence",
  "serde",
  "smallvec",
  "tile_core",

@@ -1,5 +1,8 @@
 use bevy::prelude::*;
-use sim_fluid::{FluidPlugin, LiquidRegistry, LiquidSource, builtin_liquids};
+use persistence::{
+    LoadRequest, SaveLayout, SaveRequest, SerializedEntity, load_entities, save_entities,
+};
+use sim_fluid::{FluidPlugin, LiquidDrain, LiquidRegistry, LiquidSource, builtin_liquids};
 use tile_core::chunk::ChunkData;
 use tile_core::liquid::LiquidId;
 use tile_core::material::MAT_AIR;
@@ -29,6 +32,8 @@ fn main() {
     app.add_plugins(FluidPlugin);
     app.add_plugins(render_bevy::RenderPlugin);
     app.add_plugins(worldgen_demo::DemoWorldgenPlugin);
+    app.add_plugins(persistence::PersistencePlugin);
+    app.add_systems(Update, (save_entities_system, load_entities_system));
 
     app.init_resource::<tile_core::world::World>();
 
@@ -93,6 +98,66 @@ fn clear_source_terrain(sources: Query<&LiquidSource>, mut chunks: Query<&mut Ch
         let idx = lp.index();
         if let Some(mut chunk) = chunks.iter_mut().find(|c| c.coord == coord) {
             chunk.terrain[idx] = MAT_AIR;
+        }
+    }
+}
+
+fn save_entities_system(
+    mut events: EventReader<SaveRequest>,
+    sources: Query<&LiquidSource>,
+    drains: Query<&LiquidDrain>,
+) {
+    for req in events.read() {
+        let layout = SaveLayout::new(&req.slot);
+        let mut entities: Vec<SerializedEntity> = Vec::new();
+        for source in sources.iter() {
+            let mut e = SerializedEntity::new();
+            if let Err(err) = e.push(source) {
+                eprintln!("[app] failed to serialize LiquidSource: {err}");
+                continue;
+            }
+            entities.push(e);
+        }
+        for drain in drains.iter() {
+            let mut e = SerializedEntity::new();
+            if let Err(err) = e.push(drain) {
+                eprintln!("[app] failed to serialize LiquidDrain: {err}");
+                continue;
+            }
+            entities.push(e);
+        }
+        if let Err(err) = save_entities(&layout, &entities) {
+            eprintln!("[app] entity save failed: {err}");
+        }
+    }
+}
+
+fn load_entities_system(
+    mut events: EventReader<LoadRequest>,
+    mut commands: Commands,
+    existing_sources: Query<Entity, With<LiquidSource>>,
+    existing_drains: Query<Entity, With<LiquidDrain>>,
+) {
+    for req in events.read() {
+        let layout = SaveLayout::new(&req.slot);
+        match load_entities(&layout) {
+            Err(err) => eprintln!("[app] entity load failed: {err}"),
+            Ok(serialized) => {
+                for entity in existing_sources.iter() {
+                    commands.entity(entity).despawn();
+                }
+                for entity in existing_drains.iter() {
+                    commands.entity(entity).despawn();
+                }
+                for se in &serialized {
+                    if let Some(source) = se.get::<LiquidSource>() {
+                        commands.spawn(source);
+                    } else if let Some(drain) = se.get::<LiquidDrain>() {
+                        commands.spawn(drain);
+                    }
+                }
+                eprintln!("[app] loaded {} entities", serialized.len());
+            }
         }
     }
 }
