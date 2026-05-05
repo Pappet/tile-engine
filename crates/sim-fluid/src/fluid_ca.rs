@@ -2,8 +2,10 @@ use bevy_ecs::prelude::*;
 use tile_core::activity::WakeRequests;
 use tile_core::chunk::ChunkData;
 use tile_core::coords::{CHUNK_AREA, CHUNK_SIZE, ChunkCoord};
+use tile_core::liquid::{LIQ_NONE, LiquidId};
 use tile_core::material::MAT_AIR;
 
+use crate::LiquidRegistry;
 use crate::snapshot::LiquidSnapshot;
 
 /// Bibel §8.3 — symmetric bilateral formula (no pressure).
@@ -154,9 +156,11 @@ pub fn pressure_propagation(mut chunks: Query<&mut ChunkData>, snapshot: Res<Liq
 /// Horizontal fluid CA — intra-chunk + cross-chunk borders.
 ///
 /// Uses `flow_with_pressure` so U-pipes and closed vessels work (Bibel §9.7).
+/// Viscosity is looked up per tile from `LiquidRegistry` (Bibel §9.6).
 pub fn fluid_step_local(
     mut chunks: Query<&mut ChunkData>,
     snapshot: Res<LiquidSnapshot>,
+    liquid_reg: Option<Res<LiquidRegistry>>,
     mut wake: ResMut<WakeRequests>,
 ) {
     for mut chunk in chunks.iter_mut() {
@@ -171,7 +175,6 @@ pub fn fluid_step_local(
         let mut pressures = [0u8; CHUNK_AREA];
         pressures.copy_from_slice(&*chunk.pressure_read);
         let mut deltas = [0i16; CHUNK_AREA];
-        let viscosity: u8 = 0; // per-liquid in P4.8
 
         // ── Intra-chunk: right + down pairs only ─────────────────────────
         for y in 0..CHUNK_SIZE {
@@ -181,16 +184,19 @@ pub fn fluid_step_local(
                     continue;
                 }
                 let here = amounts[idx];
+                let here_visc = visc_of(&liquid_reg, chunk.liquid_kind[idx]);
 
                 if x + 1 < CHUNK_SIZE {
                     let ni = idx + 1;
                     if chunk.terrain[ni] == MAT_AIR {
+                        let there_visc = visc_of(&liquid_reg, chunk.liquid_kind[ni]);
                         apply_intra(
                             here,
                             amounts[ni],
                             pressures[idx],
                             pressures[ni],
-                            viscosity,
+                            here_visc,
+                            there_visc,
                             idx,
                             ni,
                             &mut deltas,
@@ -200,12 +206,14 @@ pub fn fluid_step_local(
                 if y + 1 < CHUNK_SIZE {
                     let ni = idx + CHUNK_SIZE;
                     if chunk.terrain[ni] == MAT_AIR {
+                        let there_visc = visc_of(&liquid_reg, chunk.liquid_kind[ni]);
                         apply_intra(
                             here,
                             amounts[ni],
                             pressures[idx],
                             pressures[ni],
-                            viscosity,
+                            here_visc,
+                            there_visc,
                             idx,
                             ni,
                             &mut deltas,
@@ -242,9 +250,10 @@ pub fn fluid_step_local(
                 r_nb,
                 &amounts,
                 &pressures,
+                &chunk.liquid_kind,
                 &chunk.terrain,
                 &snapshot,
-                viscosity,
+                &liquid_reg,
                 &mut deltas,
                 &mut wake,
             );
@@ -257,9 +266,10 @@ pub fn fluid_step_local(
                 l_nb,
                 &amounts,
                 &pressures,
+                &chunk.liquid_kind,
                 &chunk.terrain,
                 &snapshot,
-                viscosity,
+                &liquid_reg,
                 &mut deltas,
                 &mut wake,
             );
@@ -273,9 +283,10 @@ pub fn fluid_step_local(
                 d_nb,
                 &amounts,
                 &pressures,
+                &chunk.liquid_kind,
                 &chunk.terrain,
                 &snapshot,
-                viscosity,
+                &liquid_reg,
                 &mut deltas,
                 &mut wake,
             );
@@ -288,20 +299,110 @@ pub fn fluid_step_local(
                 u_nb,
                 &amounts,
                 &pressures,
+                &chunk.liquid_kind,
                 &chunk.terrain,
                 &snapshot,
-                viscosity,
+                &liquid_reg,
                 &mut deltas,
                 &mut wake,
             );
         }
 
-        // ── Apply deltas ──────────────────────────────────────────────────
-        chunk.liquid_amount_write.copy_from_slice(&amounts);
+        // ── Apply deltas onto pre-initialized write buffer ────────────────
         for (i, &d) in deltas.iter().enumerate() {
             if d != 0 {
                 let v = (chunk.liquid_amount_write[i] as i16) + d;
                 chunk.liquid_amount_write[i] = v.clamp(0, 255) as u8;
+            }
+        }
+
+        // ── Propagate liquid_kind to newly-wet tiles ───────────────────────
+        // Horizontal flow moves amounts but not kinds. Any tile that now has
+        // amount > 0 but kind == LIQ_NONE inherited liquid from a neighbor —
+        // find that neighbor's kind and assign it.
+        let current_kinds: [LiquidId; CHUNK_AREA] = {
+            let mut k = [LIQ_NONE; CHUNK_AREA];
+            k.copy_from_slice(&*chunk.liquid_kind);
+            k
+        };
+        for i in 0..CHUNK_AREA {
+            if chunk.liquid_amount_write[i] == 0 {
+                chunk.liquid_kind_write[i] = LIQ_NONE;
+                continue;
+            }
+            if chunk.liquid_kind_write[i] != LIQ_NONE {
+                continue;
+            }
+            let x = i % CHUNK_SIZE;
+            let y = i / CHUNK_SIZE;
+
+            let kind = [
+                if x > 0 { Some(i - 1) } else { None },
+                if x + 1 < CHUNK_SIZE {
+                    Some(i + 1)
+                } else {
+                    None
+                },
+                if y > 0 { Some(i - CHUNK_SIZE) } else { None },
+                if y + 1 < CHUNK_SIZE {
+                    Some(i + CHUNK_SIZE)
+                } else {
+                    None
+                },
+            ]
+            .into_iter()
+            .flatten()
+            .find_map(|nb| {
+                let k = current_kinds[nb];
+                if k != LIQ_NONE { Some(k) } else { None }
+            })
+            .or_else(|| {
+                // Edge tiles: check cross-chunk snapshot
+                let edge_neighbors = [
+                    (
+                        x == 0,
+                        y * CHUNK_SIZE + (CHUNK_SIZE - 1),
+                        ChunkCoord {
+                            cx: coord.cx - 1,
+                            ..coord
+                        },
+                    ),
+                    (
+                        x == CHUNK_SIZE - 1,
+                        y * CHUNK_SIZE,
+                        ChunkCoord {
+                            cx: coord.cx + 1,
+                            ..coord
+                        },
+                    ),
+                    (
+                        y == 0,
+                        (CHUNK_SIZE - 1) * CHUNK_SIZE + x,
+                        ChunkCoord {
+                            cy: coord.cy - 1,
+                            ..coord
+                        },
+                    ),
+                    (
+                        y == CHUNK_SIZE - 1,
+                        x,
+                        ChunkCoord {
+                            cy: coord.cy + 1,
+                            ..coord
+                        },
+                    ),
+                ];
+                edge_neighbors
+                    .into_iter()
+                    .filter(|(on_edge, _, _)| *on_edge)
+                    .find_map(|(_, nb_idx, nb_coord)| {
+                        let k = snapshot.get_kind(nb_coord, nb_idx);
+                        if k != LIQ_NONE { Some(k) } else { None }
+                    })
+            });
+
+            if let Some(k) = kind {
+                chunk.liquid_kind_write[i] = k;
             }
         }
     }
@@ -314,17 +415,18 @@ fn apply_intra(
     there: u8,
     here_p: u8,
     there_p: u8,
-    visc: u8,
+    here_visc: u8,
+    there_visc: u8,
     hi: usize,
     ti: usize,
     deltas: &mut [i16; CHUNK_AREA],
 ) {
-    let f = flow_with_pressure(here, there, here_p, there_p, visc);
+    let f = flow_with_pressure(here, there, here_p, there_p, here_visc);
     if f > 0 {
         deltas[hi] -= f;
         deltas[ti] += f;
     } else {
-        let r = flow_with_pressure(there, here, there_p, here_p, visc);
+        let r = flow_with_pressure(there, here, there_p, here_p, there_visc);
         if r > 0 {
             deltas[ti] -= r;
             deltas[hi] += r;
@@ -341,9 +443,10 @@ fn apply_cross(
     nb_idx: usize,
     amounts: &[u8; CHUNK_AREA],
     pressures: &[u8; CHUNK_AREA],
+    kinds: &[LiquidId; CHUNK_AREA],
     terrain: &[tile_core::material::MaterialId; CHUNK_AREA],
     snapshot: &LiquidSnapshot,
-    visc: u8,
+    liquid_reg: &Option<Res<LiquidRegistry>>,
     deltas: &mut [i16; CHUNK_AREA],
     wake: &mut WakeRequests,
 ) {
@@ -357,23 +460,48 @@ fn apply_cross(
     let self_p = pressures[our_idx];
     let nb_val = snapshot.get_amount(nb_coord, nb_idx);
     let nb_p = snapshot.get_pressure(nb_coord, nb_idx);
+    let our_visc = visc_of(liquid_reg, kinds[our_idx]);
+    let nb_visc = visc_of(liquid_reg, snapshot.get_kind(nb_coord, nb_idx));
 
-    let out = flow_with_pressure(self_val, nb_val, self_p, nb_p, visc);
+    let out = flow_with_pressure(self_val, nb_val, self_p, nb_p, our_visc);
     if out > 0 {
         deltas[our_idx] -= out;
         wake.pending.push(nb_coord);
         return;
     }
-    let inflow = flow_with_pressure(nb_val, self_val, nb_p, self_p, visc);
+    let inflow = flow_with_pressure(nb_val, self_val, nb_p, self_p, nb_visc);
     if inflow > 0 {
         deltas[our_idx] += inflow;
     }
+}
+
+#[inline]
+fn visc_of(reg: &Option<Res<LiquidRegistry>>, id: LiquidId) -> u8 {
+    reg.as_ref()
+        .and_then(|r| r.get(id))
+        .map_or(0, |p| p.viscosity)
 }
 
 /// Swap read/write buffers on all chunks. Called in PostTick.
 pub fn swap_buffers_system(mut chunks: Query<&mut ChunkData>) {
     for mut chunk in chunks.iter_mut() {
         chunk.swap_buffers();
+    }
+}
+
+/// Initialize fluid write buffers to current read state at the start of each tick.
+///
+/// Both `fluid_step_local` and `liquid_vertical_flow` apply deltas on top of
+/// `liquid_amount_write` / `liquid_kind_write`. They must start from a snapshot
+/// of `_read`, otherwise deltas accumulate onto stale values from prior ticks.
+/// Pressure write is left to `pressure_propagation`, which assigns it directly.
+pub fn init_fluid_write_buffers(mut chunks: Query<&mut ChunkData>) {
+    for mut chunk in chunks.iter_mut() {
+        let chunk = &mut *chunk;
+        chunk
+            .liquid_amount_write
+            .copy_from_slice(&*chunk.liquid_amount_read);
+        chunk.liquid_kind_write.copy_from_slice(&*chunk.liquid_kind);
     }
 }
 
@@ -406,6 +534,7 @@ mod tests {
             bevy_app::Update,
             (
                 crate::snapshot::snapshot_liquid,
+                init_fluid_write_buffers,
                 pressure_propagation,
                 fluid_step_local,
                 swap_buffers_system,
@@ -658,5 +787,108 @@ mod tests {
         let a = run_sim(10);
         let b = run_sim(10);
         assert_eq!(a, b, "deterministic");
+    }
+
+    fn make_app_with_registry() -> bevy_app::App {
+        let mut app = bevy_app::App::new();
+        app.init_resource::<LiquidSnapshot>();
+        app.init_resource::<WakeRequests>();
+        let mut reg = crate::LiquidRegistry::default();
+        for (id, props) in crate::builtin_liquids() {
+            reg.add(id, props);
+        }
+        app.insert_resource(reg);
+        app.add_systems(
+            bevy_app::Update,
+            (
+                crate::snapshot::snapshot_liquid,
+                init_fluid_write_buffers,
+                pressure_propagation,
+                fluid_step_local,
+                swap_buffers_system,
+            )
+                .chain(),
+        );
+        app
+    }
+
+    /// P4.8 — Magma (visc=200) spreads slower than Water (visc=10).
+    #[test]
+    fn test_viscosity_magma_slower_than_water() {
+        let coord = ChunkCoord {
+            cx: 0,
+            cy: 0,
+            cz: 0,
+        };
+        let ticks = 5;
+        let start_idx = 16 * CHUNK_SIZE + 16;
+
+        let water_spread = {
+            let mut app = make_app_with_registry();
+            let mut chunk = ChunkData::new_filled(coord, MAT_AIR);
+            chunk.liquid_kind[start_idx] = tile_core::liquid::LiquidId(1); // Water visc=10
+            chunk.liquid_amount_read[start_idx] = 200;
+            let e = app.world_mut().spawn(chunk).id();
+            for _ in 0..ticks {
+                app.update();
+            }
+            let c = app.world().get::<ChunkData>(e).unwrap();
+            c.liquid_amount_read.iter().filter(|&&a| a > 0).count()
+        };
+
+        let magma_spread = {
+            let mut app = make_app_with_registry();
+            let mut chunk = ChunkData::new_filled(coord, MAT_AIR);
+            chunk.liquid_kind[start_idx] = tile_core::liquid::LiquidId(2); // Magma visc=200
+            chunk.liquid_amount_read[start_idx] = 200;
+            let e = app.world_mut().spawn(chunk).id();
+            for _ in 0..ticks {
+                app.update();
+            }
+            let c = app.world().get::<ChunkData>(e).unwrap();
+            c.liquid_amount_read.iter().filter(|&&a| a > 0).count()
+        };
+
+        assert!(
+            water_spread > magma_spread,
+            "water spread to {water_spread} tiles, magma to {magma_spread} — magma must spread slower"
+        );
+    }
+
+    /// P4.8 AT3 — Oil/Water mass conservation under horizontal flow.
+    #[test]
+    fn test_at3_oil_water_mass_conservation() {
+        let mut app = make_app_with_registry();
+        let coord = ChunkCoord {
+            cx: 0,
+            cy: 0,
+            cz: 0,
+        };
+        let mut chunk = ChunkData::new_filled(coord, MAT_AIR);
+        for y in 14..18 {
+            for x in 12..16 {
+                let idx = y * CHUNK_SIZE + x;
+                chunk.liquid_kind[idx] = tile_core::liquid::LiquidId(1); // Water
+                chunk.liquid_amount_read[idx] = 200;
+            }
+            for x in 16..20 {
+                let idx = y * CHUNK_SIZE + x;
+                chunk.liquid_kind[idx] = tile_core::liquid::LiquidId(4); // Oil
+                chunk.liquid_amount_read[idx] = 200;
+            }
+        }
+        let initial: u32 = chunk.liquid_amount_read.iter().map(|&a| a as u32).sum();
+        let entity = app.world_mut().spawn(chunk).id();
+
+        for _ in 0..20 {
+            app.update();
+        }
+
+        let c = app.world().get::<ChunkData>(entity).unwrap();
+        let final_total: u32 = c.liquid_amount_read.iter().map(|&a| a as u32).sum();
+        assert_eq!(
+            initial, final_total,
+            "mass conserved across oil/water boundary"
+        );
     }
 }

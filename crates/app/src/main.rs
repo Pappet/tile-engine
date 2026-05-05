@@ -1,4 +1,8 @@
 use bevy::prelude::*;
+use sim_fluid::{FluidPlugin, LiquidRegistry, LiquidSource, builtin_liquids};
+use tile_core::chunk::ChunkData;
+use tile_core::liquid::LiquidId;
+use tile_core::material::MAT_AIR;
 
 fn main() {
     let mut app = App::new();
@@ -22,8 +26,9 @@ fn main() {
     }
 
     app.add_plugins(tile_core::activity::CorePlugin);
+    app.add_plugins(FluidPlugin);
     app.add_plugins(render_bevy::RenderPlugin);
-    app.add_plugins(worldgen_earthlike::EarthlikeWorldgenPlugin);
+    app.add_plugins(worldgen_demo::DemoWorldgenPlugin);
 
     app.init_resource::<tile_core::world::World>();
 
@@ -40,9 +45,56 @@ fn main() {
     }
     app.insert_resource(material_reg);
 
+    // Initialize LiquidRegistry with builtin liquids
+    let mut liquid_reg = LiquidRegistry::default();
+    for (id, props) in builtin_liquids() {
+        liquid_reg.add(id, props);
+    }
+    app.insert_resource(liquid_reg);
+
+    app.add_systems(Startup, spawn_liquid_sources);
+    app.add_systems(PostStartup, clear_source_terrain);
     app.add_systems(Update, dummy_system);
 
     app.run();
+}
+
+fn spawn_liquid_sources(mut commands: Commands) {
+    // Demo basins: left=Magma, middle=Water, right=Oil.
+    let [magma_pos, water_pos, oil_pos] = worldgen_demo::demo_source_positions();
+
+    commands.spawn(LiquidSource {
+        pos: magma_pos,
+        kind: LiquidId(2), // Magma — visc=200, glows
+        rate: 5,
+        temperature: 1300,
+        max_pressure: 200,
+    });
+    commands.spawn(LiquidSource {
+        pos: water_pos,
+        kind: LiquidId(1), // Water — visc=10
+        rate: 5,
+        temperature: 20,
+        max_pressure: 255,
+    });
+    commands.spawn(LiquidSource {
+        pos: oil_pos,
+        kind: LiquidId(4), // Oil — visc=40
+        rate: 5,
+        temperature: 20,
+        max_pressure: 255,
+    });
+}
+
+/// Force-clear terrain at every LiquidSource position so sources are never blocked by worldgen.
+fn clear_source_terrain(sources: Query<&LiquidSource>, mut chunks: Query<&mut ChunkData>) {
+    for source in sources.iter() {
+        let (coord, lp) = source.pos.split();
+        let idx = lp.index();
+        if let Some(mut chunk) = chunks.iter_mut().find(|c| c.coord == coord) {
+            chunk.terrain[idx] = MAT_AIR;
+        }
+    }
 }
 
 #[cfg(feature = "profile")]

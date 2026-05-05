@@ -184,8 +184,10 @@ dependencies = [
  "puffin 0.19.1",
  "puffin_http",
  "render_bevy",
+ "sim_fluid",
  "tile_core",
  "worldgen_api",
+ "worldgen_demo",
  "worldgen_earthlike",
 ]
 
@@ -3898,6 +3900,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_egui",
+ "sim_fluid",
  "tile_core",
 ]
 
@@ -5598,6 +5601,16 @@ dependencies = [
  "bincode",
  "serde",
  "tile_core",
+]
+
+[[package]]
+name = "worldgen_demo"
+version = "0.1.0"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "tile_core",
+ "worldgen_api",
 ]
 
 [[package]]

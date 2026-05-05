@@ -27,6 +27,7 @@ impl bevy_app::Plugin for FluidPlugin {
             (
                 source_drain::run_sources_drains,
                 snapshot::snapshot_liquid,
+                fluid_ca::init_fluid_write_buffers,
                 fluid_ca::pressure_propagation,
                 fluid_ca::fluid_step_local,
                 vertical_flow::liquid_vertical_flow,

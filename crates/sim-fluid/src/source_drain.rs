@@ -95,15 +95,28 @@ mod tests {
     use tile_core::coords::ChunkCoord;
 
     fn make_app() -> bevy_app::App {
+        make_app_with_reg(false)
+    }
+
+    fn make_app_with_reg(with_registry: bool) -> bevy_app::App {
         use bevy_ecs::schedule::IntoSystemConfigs;
         let mut app = bevy_app::App::new();
         app.init_resource::<crate::snapshot::LiquidSnapshot>();
         app.init_resource::<tile_core::activity::WakeRequests>();
+        if with_registry {
+            let mut reg = crate::LiquidRegistry::default();
+            for (id, props) in crate::builtin_liquids() {
+                reg.add(id, props);
+            }
+            app.insert_resource(reg);
+        }
         app.add_systems(
             bevy_app::Update,
             (
                 run_sources_drains,
                 crate::snapshot::snapshot_liquid,
+                crate::fluid_ca::init_fluid_write_buffers,
+                crate::fluid_ca::pressure_propagation,
                 crate::fluid_ca::fluid_step_local,
                 crate::fluid_ca::swap_buffers_system,
             )
@@ -174,6 +187,72 @@ mod tests {
         let chunk = app.world().get::<ChunkData>(entity).unwrap();
         let total = total_liquid(chunk);
         assert!(total < 100, "drain must reduce liquid; got {total}");
+    }
+
+    /// P4.8 Test-Welt: Magma source + Oil source, viscosity difference visible.
+    ///
+    /// Magma (visc=200) must spread to fewer tiles than Oil (visc=40)
+    /// when both are injected at the same rate from separate positions.
+    #[test]
+    fn test_testwelt_magma_and_oil_sources() {
+        let mut app = make_app_with_reg(true);
+        let coord = ChunkCoord {
+            cx: 0,
+            cy: 0,
+            cz: 0,
+        };
+        app.world_mut().spawn(make_air_chunk(coord));
+
+        // Magma source at (4, 16) — left side
+        app.world_mut().spawn(LiquidSource {
+            pos: WorldPos { x: 4, y: 16, z: 0 },
+            kind: LiquidId(2), // Magma visc=200
+            rate: 5,
+            temperature: 1300,
+            max_pressure: 255,
+        });
+        // Oil source at (27, 16) — right side, far from Magma
+        app.world_mut().spawn(LiquidSource {
+            pos: WorldPos { x: 27, y: 16, z: 0 },
+            kind: LiquidId(4), // Oil visc=40
+            rate: 5,
+            temperature: 20,
+            max_pressure: 255,
+        });
+
+        for _ in 0..30 {
+            app.update();
+        }
+
+        let chunk_entity = app
+            .world_mut()
+            .query::<(bevy_ecs::entity::Entity, &ChunkData)>()
+            .iter(app.world())
+            .map(|(e, _)| e)
+            .next()
+            .unwrap();
+        let chunk = app.world().get::<ChunkData>(chunk_entity).unwrap();
+
+        let magma_tiles = chunk
+            .liquid_amount_read
+            .iter()
+            .zip(chunk.liquid_kind.iter())
+            .filter(|&(&a, &k)| a > 0 && k == LiquidId(2))
+            .count();
+
+        let oil_tiles = chunk
+            .liquid_amount_read
+            .iter()
+            .zip(chunk.liquid_kind.iter())
+            .filter(|&(&a, &k)| a > 0 && k == LiquidId(4))
+            .count();
+
+        assert!(magma_tiles > 0, "Magma source must produce liquid");
+        assert!(oil_tiles > 0, "Oil source must produce liquid");
+        assert!(
+            oil_tiles > magma_tiles,
+            "Oil (visc=40) must spread more than Magma (visc=200): oil={oil_tiles}, magma={magma_tiles}"
+        );
     }
 
     #[test]

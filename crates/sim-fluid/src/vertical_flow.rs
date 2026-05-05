@@ -45,9 +45,9 @@ pub fn liquid_vertical_flow(
 
         let mut amounts = [0u8; CHUNK_AREA];
         amounts.copy_from_slice(&*chunk.liquid_amount_read);
-        let mut kind_write: [LiquidId; CHUNK_AREA] = [LIQ_NONE; CHUNK_AREA];
-        kind_write.copy_from_slice(&*chunk.liquid_kind);
         let mut amount_deltas = [0i16; CHUNK_AREA];
+        // Track per-tile kind changes from vertical flow. None = unchanged.
+        let mut kind_change: [Option<LiquidId>; CHUNK_AREA] = [None; CHUNK_AREA];
 
         for y in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
@@ -71,7 +71,7 @@ pub fn liquid_vertical_flow(
                         if nb_kind == LIQ_NONE || nb_amt == 0 {
                             // Case 1: air below → gravity fall
                             amount_deltas[idx] -= self_amt as i16;
-                            kind_write[idx] = LIQ_NONE;
+                            kind_change[idx] = Some(LIQ_NONE);
                             wake.pending.push(below);
                         } else if nb_kind != self_kind {
                             // Case 2: different liquid → density swap if self is denser
@@ -80,7 +80,7 @@ pub fn liquid_vertical_flow(
                             if self_density > nb_density {
                                 // Self (upper) is denser → swap: we become nb's liquid
                                 amount_deltas[idx] = nb_amt as i16 - self_amt as i16;
-                                kind_write[idx] = nb_kind;
+                                kind_change[idx] = Some(nb_kind);
                                 wake.pending.push(below);
                             }
                         }
@@ -96,7 +96,7 @@ pub fn liquid_vertical_flow(
                         if self_kind == LIQ_NONE || self_amt == 0 {
                             // Case 1 (receiving side): accept falling liquid
                             amount_deltas[idx] += above_amt as i16;
-                            kind_write[idx] = above_kind;
+                            kind_change[idx] = Some(above_kind);
                         } else if above_kind != self_kind {
                             // Case 2 (receiving side): density swap — we rise if we're lighter
                             let above_density = density(&liquid_reg, above_kind);
@@ -104,7 +104,7 @@ pub fn liquid_vertical_flow(
                             if above_density > self_density {
                                 // Above is denser, we (lighter) should rise → we become above's liquid
                                 amount_deltas[idx] = above_amt as i16 - self_amt as i16;
-                                kind_write[idx] = above_kind;
+                                kind_change[idx] = Some(above_kind);
                             }
                         }
                     }
@@ -112,15 +112,21 @@ pub fn liquid_vertical_flow(
             }
         }
 
-        // ── Apply deltas ──────────────────────────────────────────────────
-        chunk.liquid_amount_write.copy_from_slice(&amounts);
+        // ── Apply deltas on top of pre-initialized write buffers ──────────
+        // `init_fluid_write_buffers` (and possibly horizontal CA) populated
+        // liquid_amount_write/liquid_kind_write. We add vertical deltas and
+        // only override kinds where vertical flow actually changed them.
         for (i, &d) in amount_deltas.iter().enumerate() {
             if d != 0 {
                 let v = (chunk.liquid_amount_write[i] as i16) + d;
                 chunk.liquid_amount_write[i] = v.clamp(0, 255) as u8;
             }
         }
-        chunk.liquid_kind_write.copy_from_slice(&kind_write);
+        for (i, change) in kind_change.iter().enumerate() {
+            if let Some(k) = change {
+                chunk.liquid_kind_write[i] = *k;
+            }
+        }
     }
 }
 
@@ -157,6 +163,7 @@ mod tests {
             Update,
             (
                 snapshot_liquid,
+                crate::fluid_ca::init_fluid_write_buffers,
                 liquid_vertical_flow,
                 crate::fluid_ca::swap_buffers_system,
             )
