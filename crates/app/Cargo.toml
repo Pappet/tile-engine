@@ -13,6 +13,7 @@ sim_fluid = { path = "../sim-fluid" }
 worldgen_api = { path = "../worldgen-api" }
 worldgen_earthlike = { path = "../worldgen-earthlike" }
 worldgen_demo = { path = "../worldgen-demo" }
+persistence = { path = "../persistence" }
 
 [features]
 profile = ["dep:puffin", "dep:puffin_http"]
