@@ -115,6 +115,7 @@ mod tests {
             (
                 run_sources_drains,
                 crate::snapshot::snapshot_liquid,
+                crate::fluid_ca::init_fluid_write_buffers,
                 crate::fluid_ca::pressure_propagation,
                 crate::fluid_ca::fluid_step_local,
                 crate::fluid_ca::swap_buffers_system,

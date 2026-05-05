@@ -308,8 +308,7 @@ pub fn fluid_step_local(
             );
         }
 
-        // ── Apply deltas ──────────────────────────────────────────────────
-        chunk.liquid_amount_write.copy_from_slice(&amounts);
+        // ── Apply deltas onto pre-initialized write buffer ────────────────
         for (i, &d) in deltas.iter().enumerate() {
             if d != 0 {
                 let v = (chunk.liquid_amount_write[i] as i16) + d;
@@ -326,7 +325,6 @@ pub fn fluid_step_local(
             k.copy_from_slice(&*chunk.liquid_kind);
             k
         };
-        chunk.liquid_kind_write.copy_from_slice(&current_kinds);
         for i in 0..CHUNK_AREA {
             if chunk.liquid_amount_write[i] == 0 {
                 chunk.liquid_kind_write[i] = LIQ_NONE;
@@ -491,6 +489,24 @@ pub fn swap_buffers_system(mut chunks: Query<&mut ChunkData>) {
     }
 }
 
+/// Initialize fluid write buffers to current read state at the start of each tick.
+///
+/// Both `fluid_step_local` and `liquid_vertical_flow` apply deltas on top of
+/// `liquid_amount_write` / `liquid_kind_write`. They must start from a snapshot
+/// of `_read`, otherwise deltas accumulate onto stale values from prior ticks.
+/// Pressure write is left to `pressure_propagation`, which assigns it directly.
+pub fn init_fluid_write_buffers(mut chunks: Query<&mut ChunkData>) {
+    for mut chunk in chunks.iter_mut() {
+        let chunk = &mut *chunk;
+        chunk
+            .liquid_amount_write
+            .copy_from_slice(&*chunk.liquid_amount_read);
+        chunk
+            .liquid_kind_write
+            .copy_from_slice(&*chunk.liquid_kind);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,6 +536,7 @@ mod tests {
             bevy_app::Update,
             (
                 crate::snapshot::snapshot_liquid,
+                init_fluid_write_buffers,
                 pressure_propagation,
                 fluid_step_local,
                 swap_buffers_system,
@@ -787,6 +804,7 @@ mod tests {
             bevy_app::Update,
             (
                 crate::snapshot::snapshot_liquid,
+                init_fluid_write_buffers,
                 pressure_propagation,
                 fluid_step_local,
                 swap_buffers_system,
