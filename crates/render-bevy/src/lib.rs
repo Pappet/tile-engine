@@ -1,9 +1,12 @@
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use sim_fluid::LiquidRegistry;
 use tile_core::chunk::ChunkData;
-use tile_core::coords::CHUNK_SIZE;
+use tile_core::coords::{CHUNK_SIZE, ChunkCoord};
 use tile_core::liquid::LIQ_NONE;
 use tile_core::material::{MAT_AIR, MaterialRegistry};
+use tile_core::world::World;
 
 pub mod camera;
 
@@ -12,7 +15,7 @@ pub struct ActiveZLayer(pub i32);
 
 impl Default for ActiveZLayer {
     fn default() -> Self {
-        Self(2) // Start at z=2: top worldgen layer, mostly air, liquids spawn here
+        Self(2)
     }
 }
 
@@ -33,6 +36,10 @@ impl Plugin for RenderPlugin {
     }
 }
 
+// Depth peeking: dim factors and atmospheric tint per level below active Z.
+const DEPTH_DIM_1: f32 = 0.55;
+const DEPTH_DIM_2: f32 = 0.30;
+
 fn handle_z_layer_change(
     mut commands: Commands,
     active_z: Res<ActiveZLayer>,
@@ -48,32 +55,40 @@ fn handle_z_layer_change(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_chunks_system(
     mut commands: Commands,
     active_z: Res<ActiveZLayer>,
     material_reg: Res<MaterialRegistry>,
     liquid_reg: Option<Res<LiquidRegistry>>,
-    mut chunks: Query<(Entity, &ChunkData), Without<ChunkVisuals>>,
-    changed_chunks: Query<(&ChunkData, &ChunkVisuals), Changed<ChunkData>>,
+    world: Res<World>,
+    new_chunks: Query<(Entity, &ChunkData), Without<ChunkVisuals>>,
+    all_chunk_data: Query<&ChunkData>,
+    all_with_visuals: Query<(&ChunkData, &ChunkVisuals)>,
+    changed_any: Query<&ChunkData, Changed<ChunkData>>,
     mut sprites: Query<&mut Sprite>,
 ) {
-    // 1. Spawn visuals for newly visible chunks
-    for (entity, chunk) in chunks.iter_mut() {
+    // 1. Spawn visuals for newly visible chunks.
+    for (entity, chunk) in new_chunks.iter() {
         if chunk.coord.cz != active_z.0 {
             continue;
         }
 
-        let mut tiles = Vec::with_capacity(chunk.terrain.len());
-
-        // 16.0 pixel per tile.
         let offset_x = (chunk.coord.cx * CHUNK_SIZE as i32) as f32 * 16.0;
         let offset_y = (chunk.coord.cy * CHUNK_SIZE as i32) as f32 * 16.0;
+        let mut tiles = Vec::with_capacity(CHUNK_SIZE * CHUNK_SIZE);
 
         for ly in 0..CHUNK_SIZE {
             for lx in 0..CHUNK_SIZE {
                 let idx = ly * CHUNK_SIZE + lx;
-                let color = tile_color(idx, chunk, &material_reg, &liquid_reg);
-
+                let color = tile_color(
+                    idx,
+                    chunk,
+                    &material_reg,
+                    &liquid_reg,
+                    &world,
+                    &all_chunk_data,
+                );
                 let x = offset_x + (lx as f32) * 16.0;
                 let y = offset_y + (ly as f32) * 16.0;
 
@@ -96,54 +111,127 @@ fn render_chunks_system(
         commands.entity(entity).insert(ChunkVisuals { tiles });
     }
 
-    // 2. Update existing visuals if ChunkData changed
-    for (chunk, visuals) in changed_chunks.iter() {
-        if chunk.coord.cz != active_z.0 {
+    // 2. Collect which active-z entities need a visual refresh.
+    //    - A chunk at active_z changed directly.
+    //    - A chunk at active_z - 1 or - 2 changed (depth-peek content changed).
+    let mut needs_update: HashSet<Entity> = HashSet::new();
+
+    for chunk in changed_any.iter() {
+        let depth = active_z.0 - chunk.coord.cz;
+        let target_coord = if depth == 0 {
+            chunk.coord
+        } else if depth == 1 || depth == 2 {
+            ChunkCoord {
+                cx: chunk.coord.cx,
+                cy: chunk.coord.cy,
+                cz: active_z.0,
+            }
+        } else {
             continue;
+        };
+
+        if let Some(&entity) = world.chunks.get(&target_coord) {
+            needs_update.insert(entity);
         }
+    }
+
+    // 3. Redraw all flagged chunks.
+    for entity in needs_update {
+        let Ok((chunk, visuals)) = all_with_visuals.get(entity) else {
+            continue;
+        };
         for (idx, &tile_entity) in visuals.tiles.iter().enumerate() {
             if let Ok(mut sprite) = sprites.get_mut(tile_entity) {
-                sprite.color = tile_color(idx, chunk, &material_reg, &liquid_reg);
+                sprite.color = tile_color(
+                    idx,
+                    chunk,
+                    &material_reg,
+                    &liquid_reg,
+                    &world,
+                    &all_chunk_data,
+                );
             }
         }
     }
 }
 
-/// Determine the display color for a tile.
-///
-/// Priority: liquid (if present) > terrain. Liquid with emits_light > 0
-/// gets its RGB brightened proportional to the emits_light value (Bibel §9.8).
+/// Flat RGBA for a tile. Returns `None` if the tile is air with no liquid (fully transparent).
+fn flat_tile_rgba(
+    idx: usize,
+    chunk: &ChunkData,
+    material_reg: &MaterialRegistry,
+    liquid_reg: &Option<Res<LiquidRegistry>>,
+) -> Option<[u8; 4]> {
+    let liq = chunk.liquid_kind[idx];
+    if liq != LIQ_NONE
+        && chunk.liquid_amount_read[idx] > 0
+        && let Some(props) = liquid_reg.as_ref().and_then(|r| r.get(liq))
+    {
+        let [r, g, b, a] = props.color;
+        if props.emits_light > 0 {
+            let boost = 1.0 + (props.emits_light as f32 / 255.0);
+            return Some([
+                (r as f32 / 255.0 * boost * 255.0).min(255.0) as u8,
+                (g as f32 / 255.0 * boost * 255.0).min(255.0) as u8,
+                (b as f32 / 255.0 * boost * 255.0).min(255.0) as u8,
+                a,
+            ]);
+        }
+        return Some([r, g, b, a]);
+    }
+
+    let mat = chunk.terrain[idx];
+    if mat == MAT_AIR {
+        return None;
+    }
+    if let Some(m) = material_reg.get(mat) {
+        return Some(m.display_color);
+    }
+    Some([255, 0, 255, 255])
+}
+
+/// Dim and blue-tint a colour by depth level. Each level: ×dim factor, −10 on R/G, +5 on B.
+fn apply_depth_tint([r, g, b, a]: [u8; 4], dim: f32, levels: u32) -> [u8; 4] {
+    let atm = levels as f32;
+    let r = (r as f32 * dim - 10.0 * atm).clamp(0.0, 255.0) as u8;
+    let g = (g as f32 * dim - 10.0 * atm).clamp(0.0, 255.0) as u8;
+    let b = (b as f32 * dim + 5.0 * atm).clamp(0.0, 255.0) as u8;
+    [r, g, b, a]
+}
+
+/// Tile colour with depth peeking: AIR tiles show the tile 1–2 layers below, darkened.
 fn tile_color(
     idx: usize,
     chunk: &ChunkData,
     material_reg: &MaterialRegistry,
     liquid_reg: &Option<Res<LiquidRegistry>>,
+    world: &World,
+    all_chunks: &Query<&ChunkData>,
 ) -> Color {
-    let liquid_kind = chunk.liquid_kind[idx];
-    if liquid_kind != LIQ_NONE
-        && chunk.liquid_amount_read[idx] > 0
-        && let Some(props) = liquid_reg.as_ref().and_then(|r| r.get(liquid_kind))
-    {
-        let [r, g, b, a] = props.color;
-        if props.emits_light > 0 {
-            let boost = 1.0 + (props.emits_light as f32 / 255.0);
-            return Color::srgba(
-                (r as f32 / 255.0 * boost).min(1.0),
-                (g as f32 / 255.0 * boost).min(1.0),
-                (b as f32 / 255.0 * boost).min(1.0),
-                a as f32 / 255.0,
-            );
-        }
+    if let Some([r, g, b, a]) = flat_tile_rgba(idx, chunk, material_reg, liquid_reg) {
         return Color::srgba_u8(r, g, b, a);
     }
 
-    let mat_id = chunk.terrain[idx];
-    if mat_id == MAT_AIR {
-        Color::srgba_u8(0, 0, 0, 0)
-    } else if let Some(mat) = material_reg.get(mat_id) {
-        let [r, g, b, a] = mat.display_color;
-        Color::srgba_u8(r, g, b, a)
-    } else {
-        Color::srgba_u8(255, 0, 255, 255)
+    // AIR with no liquid: peek at Z-1, then Z-2.
+    for depth_level in 1u32..=2 {
+        let below = ChunkCoord {
+            cx: chunk.coord.cx,
+            cy: chunk.coord.cy,
+            cz: chunk.coord.cz - depth_level as i32,
+        };
+        if let Some(&entity) = world.chunks.get(&below)
+            && let Ok(below_chunk) = all_chunks.get(entity)
+            && let Some(rgba) = flat_tile_rgba(idx, below_chunk, material_reg, liquid_reg)
+        {
+            let dim = if depth_level == 1 {
+                DEPTH_DIM_1
+            } else {
+                DEPTH_DIM_2
+            };
+            let [r, g, b, a] = apply_depth_tint(rgba, dim, depth_level);
+            return Color::srgba_u8(r, g, b, a);
+        }
     }
+
+    Color::srgba_u8(0, 0, 0, 0)
 }
