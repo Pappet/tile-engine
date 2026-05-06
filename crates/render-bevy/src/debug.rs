@@ -17,7 +17,6 @@ impl Plugin for DebugUiPlugin {
         app.add_plugins(EguiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin)
             .add_plugins(EntityCountDiagnosticsPlugin)
-            .add_plugins(SystemInformationDiagnosticsPlugin)
             .add_systems(Update, debug_window);
     }
 }
@@ -42,29 +41,18 @@ fn debug_window(
         .unwrap_or(0.0)
         * 1000.0;
 
-    let cpu = diagnostics
-        .get(&SystemInformationDiagnosticsPlugin::CPU_USAGE)
-        .and_then(|d| d.smoothed())
-        .unwrap_or(0.0);
-
-    let mem = diagnostics
-        .get(&SystemInformationDiagnosticsPlugin::MEM_USAGE)
-        .and_then(|d| d.smoothed())
-        .unwrap_or(0.0);
-
     let entity_count = diagnostics
         .get(&EntityCountDiagnosticsPlugin::ENTITY_COUNT)
         .and_then(|d| d.value())
         .unwrap_or(0.0) as u64;
 
-    // Calculate world stats
+    // Calculate world stats - only count chunks, skip tile iteration
     let mut total_active = 0;
     let mut active_fluid = 0;
     let mut active_temp = 0;
     let mut active_erosion = 0;
     let mut active_reaction = 0;
     let mut dirty_chunks = 0;
-    let mut total_liquid = 0u64;
 
     for chunk in chunks.iter() {
         if !chunk.active.is_empty() {
@@ -85,9 +73,6 @@ fn debug_window(
         if chunk.dirty {
             dirty_chunks += 1;
         }
-        for &amount in chunk.liquid_amount_read.iter() {
-            total_liquid += amount as u64;
-        }
     }
 
     egui::Window::new("Debug")
@@ -100,8 +85,6 @@ fn debug_window(
             ui.heading("Performance");
             ui.label(format!("FPS:         {fps:.1}"));
             ui.label(format!("Frame:       {frame_ms:.2} ms"));
-            ui.label(format!("CPU:         {cpu:.1}%"));
-            ui.label(format!("Memory:      {mem:.1} MB"));
             ui.separator();
 
             ui.heading("World");
@@ -116,7 +99,6 @@ fn debug_window(
                 ui.label(format!("    React:   {active_reaction}"));
             }
             ui.label(format!("Entities:    {entity_count}"));
-            ui.label(format!("Liquid Sum:  {total_liquid}"));
             ui.separator();
 
             ui.heading("Sim Internals");
