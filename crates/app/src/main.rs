@@ -178,11 +178,15 @@ fn register_reactions(mut registry: ResMut<ReactionRegistry>) {
         name: "magma_water_solidify".to_string(),
         trigger: Trigger::LiquidCollision,
         conditions: vec![
-            Condition::TileLiquidIs(LiquidId(2)),      // existing = Magma
-            Condition::IncomingLiquidIs(LiquidId(1)),  // incoming = Water
+            Condition::TileLiquidIs(LiquidId(2)),     // existing = Magma
+            Condition::IncomingLiquidIs(LiquidId(1)), // incoming = Water
         ],
         effects: vec![
-            Effect::SetLiquid { kind: LIQ_NONE, amount: 0, temp: 0 },
+            Effect::SetLiquid {
+                kind: LIQ_NONE,
+                amount: 0,
+                temp: 0,
+            },
             Effect::SetTileMaterial(MaterialId(5)), // Basalt
         ],
         primary_material: None,
