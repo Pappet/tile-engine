@@ -165,24 +165,20 @@ pub fn periodic_reaction_system(
             let crate::Trigger::Periodic { every_ticks } = reaction.trigger else {
                 continue;
             };
-            if every_ticks > 0 && tick % every_ticks as u64 != 0 {
+            if every_ticks > 0 && !tick.is_multiple_of(every_ticks as u64) {
                 continue;
             }
 
-            // Fast pre-filter by min/max temperature.
-            // (Can't skip per-tile here without iterating, so done inside loop.)
-
             for idx in 0..tile_core::coords::CHUNK_AREA {
-                // Temperature pre-filter.
-                if let Some(min_t) = reaction.min_temperature {
-                    if chunk.temp[idx] < min_t {
-                        continue;
-                    }
+                if let Some(min_t) = reaction.min_temperature
+                    && chunk.temp[idx] < min_t
+                {
+                    continue;
                 }
-                if let Some(max_t) = reaction.max_temperature {
-                    if chunk.temp[idx] > max_t {
-                        continue;
-                    }
+                if let Some(max_t) = reaction.max_temperature
+                    && chunk.temp[idx] > max_t
+                {
+                    continue;
                 }
 
                 // Evaluate conditions.
