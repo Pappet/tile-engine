@@ -137,10 +137,10 @@ fn is_demo_solid(wx: i32, wy: i32, cz: i32) -> bool {
             return true;
         }
         // Outer walls
-        if x1 == 0 || x1 == Z1_WIDTH - 1 || y1 == -Z1_HEIGHT / 2 || y1 == Z1_HEIGHT / 2 - 1 {
-            if cz <= 6 {
-                return true;
-            }
+        if (x1 == 0 || x1 == Z1_WIDTH - 1 || y1 == -Z1_HEIGHT / 2 || y1 == Z1_HEIGHT / 2 - 1)
+            && cz <= 6
+        {
+            return true;
         }
         // Steps: 4 steps of 4x10 each
         let step = x1 / 4; // 0, 1, 2, 3
