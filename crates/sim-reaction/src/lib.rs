@@ -1,3 +1,5 @@
+pub mod resolver;
+
 use std::collections::HashMap;
 
 use bevy_ecs::prelude::*;

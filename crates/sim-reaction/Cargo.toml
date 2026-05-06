@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bevy_ecs = "0.14.2"
+bevy_app = "0.14.2"
 serde = { version = "1.0", features = ["derive"] }
 tile_core = { path = "../core" }
 sim_fluid = { path = "../sim-fluid" }

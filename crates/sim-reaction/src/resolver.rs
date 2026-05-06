@@ -1,0 +1,470 @@
+use bevy_ecs::prelude::*;
+use tile_core::chunk::ChunkData;
+use tile_core::coords::ChunkCoord;
+use tile_core::liquid::LIQ_NONE;
+use tile_core::material::MaterialRegistry;
+use tile_core::rng::mix_hash;
+use tile_core::world::World;
+
+use crate::{Condition, Effect, ReactionId, ReactionRegistry, TriggerKind};
+use sim_fluid::LiquidRegistry;
+
+// ── PendingEffects ────────────────────────────────────────────────────────────
+
+struct PendingEffect {
+    coord: ChunkCoord,
+    idx: usize,
+    reaction_id: ReactionId,
+    effects: Vec<Effect>,
+}
+
+/// Deferred effect buffer — filled in Phase 1, applied in Phase 2.
+#[derive(Resource, Default)]
+pub struct PendingEffects {
+    buffer: Vec<PendingEffect>,
+}
+
+// ── Condition evaluator ───────────────────────────────────────────────────────
+
+fn evaluate(
+    cond: &Condition,
+    chunk: &ChunkData,
+    idx: usize,
+    material_reg: &MaterialRegistry,
+    liquid_reg: &LiquidRegistry,
+) -> bool {
+    match cond {
+        Condition::TileMaterialIs(mat) => chunk.terrain[idx] == *mat,
+        Condition::TileLiquidIs(liq) => chunk.liquid_kind[idx] == *liq,
+        Condition::TileLiquidAmountAtLeast(min) => chunk.liquid_amount_read[idx] >= *min,
+        Condition::TempBetween(lo, hi) => {
+            let t = chunk.temp[idx];
+            t >= *lo && t <= *hi
+        }
+        Condition::LiquidTempBetween(lo, hi) => {
+            let t = chunk.liquid_temp_read[idx];
+            t >= *lo && t <= *hi
+        }
+        Condition::PressureAtLeast(min) => chunk.pressure_read[idx] >= *min,
+        Condition::MaterialHasFlag(flag) => {
+            if let Some(mat) = material_reg.get(chunk.terrain[idx]) {
+                mat.flags.contains(*flag)
+            } else {
+                false
+            }
+        }
+        Condition::LiquidHasFlag(flag) => {
+            if let Some(props) = liquid_reg.get(chunk.liquid_kind[idx]) {
+                props.flags.contains(*flag)
+            } else {
+                false
+            }
+        }
+        Condition::MaterialContainsElement { elem, min_fraction } => {
+            if let Some(mat) = material_reg.get(chunk.terrain[idx]) {
+                mat.composition
+                    .iter()
+                    .any(|(e, f)| e == elem && *f >= *min_fraction)
+            } else {
+                false
+            }
+        }
+        // Boolean
+        Condition::Not(inner) => !evaluate(inner, chunk, idx, material_reg, liquid_reg),
+        Condition::AnyOf(conds) => conds
+            .iter()
+            .any(|c| evaluate(c, chunk, idx, material_reg, liquid_reg)),
+        Condition::AllOf(conds) => conds
+            .iter()
+            .all(|c| evaluate(c, chunk, idx, material_reg, liquid_reg)),
+        // Not implemented for Periodic trigger
+        Condition::NeighborMaterialIs { .. }
+        | Condition::NeighborLiquidIs { .. }
+        | Condition::AnyNeighborIs(_)
+        | Condition::AgeAtLeast { .. }
+        | Condition::IsTimeOfDay(_)
+        | Condition::DepthBelow(_)
+        | Condition::HasTag(_)
+        | Condition::IncomingLiquidIs(_) => false,
+    }
+}
+
+// ── Effect applier ────────────────────────────────────────────────────────────
+
+fn apply_effects(chunk: &mut ChunkData, idx: usize, effects: &[Effect]) {
+    for effect in effects {
+        match effect {
+            Effect::SetTileMaterial(mat) => {
+                chunk.terrain[idx] = *mat;
+                chunk.dirty = true;
+            }
+            Effect::SetLiquid { kind, amount, temp } => {
+                chunk.liquid_kind[idx] = *kind;
+                chunk.liquid_amount_read[idx] = *amount;
+                chunk.liquid_temp_read[idx] = *temp;
+                if *amount == 0 {
+                    chunk.liquid_kind[idx] = LIQ_NONE;
+                }
+                chunk.dirty = true;
+            }
+            Effect::AddLiquidAmount(delta) => {
+                let cur = chunk.liquid_amount_read[idx] as i16;
+                let new = (cur + delta).clamp(0, 255) as u8;
+                chunk.liquid_amount_read[idx] = new;
+                if new == 0 {
+                    chunk.liquid_kind[idx] = LIQ_NONE;
+                }
+                chunk.dirty = true;
+            }
+            Effect::AddTemperature(delta) => {
+                chunk.temp[idx] = chunk.temp[idx].saturating_add(*delta);
+                chunk.dirty = true;
+            }
+            Effect::SetTemperature(val) => {
+                chunk.temp[idx] = *val;
+                chunk.dirty = true;
+            }
+            // Out-of-scope for P6.2 — ignored
+            Effect::SetStain { .. }
+            | Effect::EmitGas { .. }
+            | Effect::SpawnItem { .. }
+            | Effect::SpawnEntity { .. }
+            | Effect::EmitEvent(_)
+            | Effect::PropagateToNeighbor { .. }
+            | Effect::AreaEffect { .. } => {}
+        }
+    }
+}
+
+// ── periodic_reaction_system ──────────────────────────────────────────────────
+
+pub fn periodic_reaction_system(
+    world_res: Res<World>,
+    registry: Res<ReactionRegistry>,
+    mut pending: ResMut<PendingEffects>,
+    mut chunks: Query<&mut ChunkData>,
+    material_reg: Res<MaterialRegistry>,
+    liquid_reg: Res<LiquidRegistry>,
+) {
+    let tick = world_res.current_tick;
+    let periodic_ids = registry.by_trigger(&TriggerKind::Periodic);
+    if periodic_ids.is_empty() {
+        return;
+    }
+
+    // Phase 1: collect pending effects (immutable chunk reads).
+    for chunk in chunks.iter() {
+        let coord = chunk.coord;
+        for rid in periodic_ids {
+            let reaction = match registry.get(*rid) {
+                Some(r) => r,
+                None => continue,
+            };
+
+            // Periodic phase-offset: skip ticks where (tick % every_ticks) != 0.
+            let crate::Trigger::Periodic { every_ticks } = reaction.trigger else {
+                continue;
+            };
+            if every_ticks > 0 && tick % every_ticks as u64 != 0 {
+                continue;
+            }
+
+            // Fast pre-filter by min/max temperature.
+            // (Can't skip per-tile here without iterating, so done inside loop.)
+
+            for idx in 0..tile_core::coords::CHUNK_AREA {
+                // Temperature pre-filter.
+                if let Some(min_t) = reaction.min_temperature {
+                    if chunk.temp[idx] < min_t {
+                        continue;
+                    }
+                }
+                if let Some(max_t) = reaction.max_temperature {
+                    if chunk.temp[idx] > max_t {
+                        continue;
+                    }
+                }
+
+                // Evaluate conditions.
+                if !reaction
+                    .conditions
+                    .iter()
+                    .all(|c| evaluate(c, chunk, idx, &material_reg, &liquid_reg))
+                {
+                    continue;
+                }
+
+                // Probability roll.
+                if reaction.probability < u16::MAX {
+                    let h = mix_hash(coord, idx, tick, rid.0);
+                    if (h & 0xFFFF) >= reaction.probability as u64 {
+                        continue;
+                    }
+                }
+
+                pending.buffer.push(PendingEffect {
+                    coord,
+                    idx,
+                    reaction_id: *rid,
+                    effects: reaction.effects.clone(),
+                });
+            }
+        }
+    }
+
+    // Phase 2: apply effects — deterministic order (coord, idx, reaction_id).
+    pending
+        .buffer
+        .sort_unstable_by_key(|p| (p.coord.cx, p.coord.cy, p.coord.cz, p.idx, p.reaction_id.0));
+
+    // Collect coords to find chunks by coord.
+    let effects: Vec<_> = pending.buffer.drain(..).collect();
+    for pe in effects {
+        if let Some(mut chunk) = chunks.iter_mut().find(|c| c.coord == pe.coord) {
+            apply_effects(&mut chunk, pe.idx, &pe.effects);
+        }
+    }
+}
+
+// ── ReactionPlugin ────────────────────────────────────────────────────────────
+
+pub struct ReactionPlugin;
+
+impl bevy_app::Plugin for ReactionPlugin {
+    fn build(&self, app: &mut bevy_app::App) {
+        app.init_resource::<ReactionRegistry>();
+        app.init_resource::<PendingEffects>();
+        app.add_systems(bevy_app::Update, periodic_reaction_system);
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Condition, Effect, Reaction, ReactionRegistry, Trigger};
+    use bevy_app::App;
+    use tile_core::chunk::ChunkData;
+    use tile_core::coords::{CHUNK_SIZE, ChunkCoord};
+    use tile_core::liquid::LiquidId;
+    use tile_core::material::{MAT_AIR, MaterialId, MaterialRegistry, builtin_materials};
+    use tile_core::world::World;
+
+    fn make_app(with_world: bool) -> App {
+        let mut app = App::new();
+        app.init_resource::<ReactionRegistry>();
+        app.init_resource::<PendingEffects>();
+        app.init_resource::<LiquidRegistry>();
+        let mut mat_reg = MaterialRegistry::default();
+        for (id, mat) in builtin_materials() {
+            mat_reg.add(id, mat);
+        }
+        app.insert_resource(mat_reg);
+        if with_world {
+            app.init_resource::<World>();
+        } else {
+            // current_tick = 0 by default
+            app.init_resource::<World>();
+        }
+        app.add_systems(bevy_app::Update, periodic_reaction_system);
+        app
+    }
+
+    fn make_air_chunk(coord: ChunkCoord) -> ChunkData {
+        ChunkData::new_filled(coord, MAT_AIR)
+    }
+
+    const COORD: ChunkCoord = ChunkCoord {
+        cx: 0,
+        cy: 0,
+        cz: 0,
+    };
+
+    // ── Acceptance Test 1: iron ore → magma (Bibel 10.13 §1) ─────────────────
+
+    #[test]
+    fn test_iron_ore_smelt() {
+        const IRON_ORE: MaterialId = MaterialId(5);
+        const MAGMA: LiquidId = LiquidId(2);
+
+        let mut app = make_app(false);
+
+        // Register iron-smelt reaction.
+        let reaction = Reaction {
+            name: "iron_smelt".to_string(),
+            trigger: Trigger::Periodic { every_ticks: 1 },
+            conditions: vec![
+                Condition::TileMaterialIs(IRON_ORE),
+                Condition::TempBetween(1200, i16::MAX),
+            ],
+            effects: vec![
+                Effect::SetLiquid {
+                    kind: MAGMA,
+                    amount: 200,
+                    temp: 1300,
+                },
+                Effect::SetTileMaterial(MAT_AIR),
+            ],
+            primary_material: Some(IRON_ORE),
+            primary_liquid: None,
+            min_temperature: Some(1200),
+            max_temperature: None,
+            probability: u16::MAX,
+            cooldown_ticks: 0,
+        };
+        app.world_mut()
+            .resource_mut::<ReactionRegistry>()
+            .add(reaction);
+
+        // Spawn chunk with iron ore at tile 42, temp 1300.
+        let mut chunk = make_air_chunk(COORD);
+        chunk.terrain[42] = IRON_ORE;
+        chunk.temp[42] = 1300;
+        let entity = app.world_mut().spawn(chunk).id();
+
+        app.update();
+
+        let chunk = app.world().get::<ChunkData>(entity).unwrap();
+        assert_eq!(
+            chunk.terrain[42], MAT_AIR,
+            "iron ore must become air after smelt"
+        );
+        assert_eq!(chunk.liquid_kind[42], MAGMA, "tile must contain magma");
+        assert_eq!(chunk.liquid_amount_read[42], 200);
+    }
+
+    // ── Acceptance Test 2: water → ice cycle (Bibel 10.13 §2) ────────────────
+
+    #[test]
+    fn test_water_freeze() {
+        const WATER: LiquidId = LiquidId(1);
+        const ICE: MaterialId = MaterialId(10);
+
+        let mut app = make_app(false);
+
+        let reaction = Reaction {
+            name: "water_freeze".to_string(),
+            trigger: Trigger::Periodic { every_ticks: 1 },
+            conditions: vec![
+                Condition::TileLiquidIs(WATER),
+                Condition::TileLiquidAmountAtLeast(10),
+                Condition::TempBetween(i16::MIN, -1),
+            ],
+            effects: vec![
+                Effect::SetTileMaterial(ICE),
+                Effect::SetLiquid {
+                    kind: LiquidId(0),
+                    amount: 0,
+                    temp: 0,
+                },
+            ],
+            primary_material: None,
+            primary_liquid: Some(WATER),
+            min_temperature: None,
+            max_temperature: Some(-1),
+            probability: u16::MAX,
+            cooldown_ticks: 0,
+        };
+        app.world_mut()
+            .resource_mut::<ReactionRegistry>()
+            .add(reaction);
+
+        let mut chunk = make_air_chunk(COORD);
+        let idx = 5 * CHUNK_SIZE + 5;
+        chunk.liquid_kind[idx] = WATER;
+        chunk.liquid_amount_read[idx] = 100;
+        chunk.temp[idx] = -10; // below freezing
+        let entity = app.world_mut().spawn(chunk).id();
+
+        app.update();
+
+        let chunk = app.world().get::<ChunkData>(entity).unwrap();
+        assert_eq!(chunk.terrain[idx], ICE, "water must freeze to ice");
+        assert_eq!(chunk.liquid_amount_read[idx], 0, "liquid must be consumed");
+    }
+
+    // ── Determinism test (Bibel 10.9) ─────────────────────────────────────────
+
+    #[test]
+    fn test_determinism_same_tick_same_result() {
+        let prob = 32768u16; // 50%
+
+        let mut results_a = Vec::new();
+        let mut results_b = Vec::new();
+
+        for tick in 0u64..10 {
+            let rid = ReactionId(0);
+            let mut fired_a = Vec::new();
+            let mut fired_b = Vec::new();
+
+            // Roll twice with same inputs — must agree.
+            for idx in 0..tile_core::coords::CHUNK_AREA {
+                let h1 = mix_hash(COORD, idx, tick, rid.0);
+                let h2 = mix_hash(COORD, idx, tick, rid.0);
+                fired_a.push((h1 & 0xFFFF) < prob as u64);
+                fired_b.push((h2 & 0xFFFF) < prob as u64);
+            }
+            results_a.push(fired_a.clone());
+            results_b.push(fired_b);
+        }
+
+        for i in 0..10 {
+            assert_eq!(
+                results_a[i], results_b[i],
+                "tick {i}: same inputs must produce same result"
+            );
+        }
+    }
+
+    // ── Periodic phase-offset: every_ticks=4 only fires on multiples ──────────
+
+    #[test]
+    fn test_periodic_phase_offset() {
+        const IRON_ORE: MaterialId = MaterialId(5);
+        const IDX: usize = 0;
+
+        let mut app = make_app(false);
+
+        let reaction = Reaction {
+            name: "slow_smelt".to_string(),
+            trigger: Trigger::Periodic { every_ticks: 4 },
+            conditions: vec![Condition::TileMaterialIs(IRON_ORE)],
+            effects: vec![Effect::SetTemperature(999)],
+            primary_material: Some(IRON_ORE),
+            primary_liquid: None,
+            min_temperature: None,
+            max_temperature: None,
+            probability: u16::MAX,
+            cooldown_ticks: 0,
+        };
+        app.world_mut()
+            .resource_mut::<ReactionRegistry>()
+            .add(reaction);
+
+        let mut chunk = make_air_chunk(COORD);
+        chunk.terrain[IDX] = IRON_ORE;
+        let entity = app.world_mut().spawn(chunk).id();
+
+        // tick=0 → fires (0 % 4 == 0)
+        app.update();
+        let chunk = app.world().get::<ChunkData>(entity).unwrap();
+        assert_eq!(chunk.temp[IDX], 999, "must fire at tick 0");
+
+        // Reset temp, advance to tick=1 manually.
+        app.world_mut().get_mut::<ChunkData>(entity).unwrap().temp[IDX] = 0;
+        app.world_mut().resource_mut::<World>().current_tick = 1;
+
+        app.update();
+        let chunk = app.world().get::<ChunkData>(entity).unwrap();
+        assert_eq!(chunk.temp[IDX], 0, "must NOT fire at tick 1");
+
+        // tick=4 → fires again
+        app.world_mut().get_mut::<ChunkData>(entity).unwrap().temp[IDX] = 0;
+        app.world_mut().resource_mut::<World>().current_tick = 4;
+
+        app.update();
+        let chunk = app.world().get::<ChunkData>(entity).unwrap();
+        assert_eq!(chunk.temp[IDX], 999, "must fire at tick 4");
+    }
+}

@@ -5,6 +5,7 @@ pub mod chunk;
 pub mod coords;
 pub mod liquid;
 pub mod material;
+pub mod rng;
 pub mod world;
 
 pub use material::{
