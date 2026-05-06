@@ -45,6 +45,7 @@ tile-engine/
 │   ├── worldgen-api/           (Stage-Traits, Stage-Resources)
 │   ├── worldgen-earthlike/     (Standard-Welttyp)
 │   ├── render-bevy/            (Renderer-Plugin)
+│   ├── debug-ui/               (Debug-Overlay – oberste Schicht, sieht alles)
 │   ├── persistence/            (Save/Load)
 │   └── app/                    (Binary, fügt Plugins zusammen)
 └── data/                       (RON/TOML-Definitionen)
@@ -1086,7 +1087,122 @@ ist offene TODO-Frage).
 
 ---
 
-## Phase 12 – Polish und Erweiterungen
+## Phase 13 – Debug-UI-Crate
+
+Eigenständige Crate `crates/debug-ui/`, die oberhalb aller Sim-Schichten
+sitzt und Zugriff auf alle Interna hat. Behebt die aktuelle Schichtverletzung
+(`render-bevy` importiert `sim_reaction`).
+
+**Schichtprinzip:** `debug-ui` darf von `tile_core`, `sim_fluid`,
+`sim_reaction`, `sim_thermal`, `render_bevy` und `worldgen_api` abhängen –
+aber keine dieser Crates darf von `debug-ui` abhängen.
+
+---
+
+### P13.1 – debug-ui Crate + Migration
+
+**Ziel:** Bestehende Debug-UI aus `render-bevy` herauslösen, Schichtverletzung beseitigen.
+
+**Bibel-Referenz:** Sektion 3 (Schichten).
+
+**Inputs:** P6.3 (Reaktions-System vorhanden), P2.1 (Renderer vorhanden).
+
+**Liefergegenstände:**
+- Neue Crate `crates/debug-ui/` mit `DebugUiPlugin`.
+- `render-bevy/src/debug.rs` Inhalt nach `debug-ui/src/lib.rs` migriert.
+- `render-bevy` verliert Abhängigkeit auf `sim_reaction` und `tile_core::activity::WakeRequests` (nur noch Renderer-interne Typen wie `ActiveZLayer`).
+- `ActiveZLayer` aus `render-bevy` re-exportiert oder in `tile_core` verschoben, damit `debug-ui` darauf zugreifen kann ohne zirkuläre Abhängigkeit.
+- `app/Cargo.toml` ersetzt `render-bevy`-Debug-Feature durch `debug-ui`.
+- Bestehende Debug-Fenster-Funktionalität bleibt erhalten (Performance, World, Sim Internals).
+
+**Akzeptanzkriterien:**
+- `cargo build --workspace` grün.
+- `render-bevy/Cargo.toml` hat keine `sim_reaction`-Abhängigkeit mehr.
+- Debug-Fenster zeigt dieselben Informationen wie vorher.
+- `cargo test --workspace` grün.
+
+**Out-of-Scope:** Neue Debug-Panels, Inspector, Overlays.
+
+---
+
+### P13.2 – Erweiterte Sim-Stats-Panels
+
+**Ziel:** Detaillierte Laufzeit-Metriken aller Sim-Subsysteme einsehbar.
+
+**Bibel-Referenz:** Sektion 7 (Sim-Set-Ordering), Sektion 9 (Fluid), Sektion 10 (Reaktionen).
+
+**Inputs:** P13.1.
+
+**Liefergegenstände:**
+- Panel **Fluid**: Gesamtflüssigkeit nach Liquid-Typ (Summe `liquid_amount_read` pro `LiquidId`), aktive Chunks (mindestens 1 non-zero Tile), WakeRequests-Tiefe.
+- Panel **Reactions**: `PendingEffects`-Tiefe, Reaktionen/Tick (gleitender Durchschnitt, z.B. über 60 Ticks).
+- Panel **World**: bestehende Chunks/Entities/Tick-Anzeige, ergänzt um Dirty-Chunk-Zähler.
+- Alle Panels als `ui.collapsing()`-Sektionen (standardmässig zugeklappt).
+- Stats werden nur berechnet wenn Panel aufgeklappt (lazy evaluation via `CollapsingHeader::show_unindented` mit Guard).
+
+**Akzeptanzkriterien:**
+- Fluid-Summe bleibt konstant bei geschlossenem Becken (Massenerhaltungs-Sichtbarkeit).
+- Dirty-Chunk-Zähler fällt auf 0 wenn Sim einfriert (keine Änderungen).
+- Kein messbarer FPS-Einbruch bei zugeklappten Panels.
+
+**Out-of-Scope:** Zeitreihengraphen (kommt in P13.4), Thermal-Stats (kein Thermal-System yet).
+
+---
+
+### P13.3 – Tile-Inspector
+
+**Ziel:** Klick auf Tile zeigt alle Felder des Tiles im Debug-Panel.
+
+**Bibel-Referenz:** Sektion 4.3 (ChunkData-Felder), Sektion 5 (Koordinaten).
+
+**Inputs:** P13.1.
+
+**Liefergegenstände:**
+- Mausklick-System in `debug-ui`: Weltkoordinaten aus Cursor-Position + aktiver Z-Ebene berechnen (via `Camera`-`GlobalTransform`).
+- `InspectedTile`-Resource (`Option<WorldPos>`) speichert zuletzt angeklickte Position.
+- Inspector-Panel zeigt für angeklickte Tile:
+  - `terrain: MaterialId` + Name aus `MaterialRegistry`
+  - `liquid_kind: LiquidId` + Name + `liquid_amount_read`
+  - `liquid_temp_read`, `pressure_read`
+  - `temp`
+  - `dirty`-Flag des Chunks
+- Klick ausserhalb des Weltraums: Inspector leert sich.
+
+**Akzeptanzkriterien:**
+- Klick auf Magma-Tile zeigt `liquid_kind: LiquidId(2) "Magma"`, korrekte Amount.
+- Klick auf Wand-Tile zeigt `terrain: MaterialId(1) "Granit"`, kein Liquid.
+- Klick-System interferiert nicht mit der Sim (read-only).
+
+**Out-of-Scope:** Multi-Tile-Selektion, Tile-Editierung via Inspector.
+
+---
+
+### P13.4 – Chunk- und Activity-Overlays
+
+**Ziel:** Visuelle Overlays über den Tiles für Debugging von Sim-Verhalten.
+
+**Bibel-Referenz:** Sektion 7.3 (Activity-System), Sektion 8.4 (Wake-Propagation).
+
+**Inputs:** P13.1.
+
+**Liefergegenstände:**
+- Toggle-Resource `DebugOverlays { chunk_borders: bool, activity: bool, liquid_heatmap: bool }`.
+- Tastenbelegung (z.B. F1/F2/F3) schaltet Overlays um.
+- **Chunk-Borders-Overlay**: dünne farbige Linie entlang Chunk-Grenzen (egui-Painter oder eigene Bevy-Gizmo-Sprites).
+- **Activity-Overlay**: aktive Chunks (per `SystemMask`) leicht eingefärbt (z.B. FLUID-aktiv = Blau-Tint).
+- **Liquid-Heatmap**: `liquid_amount_read` als Farbintensität über dem normalen Tile-Render (additiv, semi-transparent).
+- Overlays nur auf aktiver Z-Ebene gezeichnet.
+
+**Akzeptanzkriterien:**
+- Chunk-Border-Overlay zeigt korrekte 32×32-Gitter.
+- Activity-Overlay zeigt Ausbreitung von Aktivität wenn Flüssigkeit fliesst (sichtbar durch Farbänderung).
+- Alle drei Overlays kombinierbar aktiv ohne Abstürze.
+
+**Out-of-Scope:** Performance-Profiling-Overlay (Puffin ist dafür), Zeitreihen-Graphen.
+
+---
+
+
 
 Diese Phase ist offen und wird nach Bedarf gefüllt. Mögliche Pakete:
 
@@ -1117,8 +1233,9 @@ P0.1 ──┬─ P0.2
                                                           P5.1 ─ P5.2 ─ P5.3
                                                                   │
                                                           P6.1 ─ P6.2 ─ P6.3 ─ P6.4 ─ P6.5
-                                                                                       │
-                                                          P7.1 ─ P7.2 ─ P7.3 ──────────┘
+                                                                       │               │
+                                                          P13.1 ───────┘    P7.1 ─ P7.2 ─ P7.3 ──┘
+                                                          P13.2 ─ P13.3 ─ P13.4
                                                                   │
                                                           P8.1 ──┤
                                                           P8.2 ─ P8.3
@@ -1144,6 +1261,10 @@ Pakete, die parallel an verschiedene Agenten gehen können:
 
 **Gleichzeitig nach P4.8 möglich:**
 - P5.1 (Save-Header) und P6.1 (Reaktions-Skelett) sind unabhängig.
+
+**Gleichzeitig nach P6.3 möglich:**
+- P13.1 (debug-ui Extraktion) ist unabhängig von P6.4+, kann jetzt gestartet werden.
+- P13.2, P13.3, P13.4 sind nach P13.1 untereinander unabhängig (parallel durchführbar).
 
 **Gleichzeitig nach P6.4 möglich:**
 - P7.1 (Stains), P8.1 (Hydrologie), P9.1 (Sediment) sind unabhängig.
