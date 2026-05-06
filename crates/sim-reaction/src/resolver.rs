@@ -22,6 +22,8 @@ struct PendingEffect {
 #[derive(Resource, Default)]
 pub struct PendingEffects {
     buffer: Vec<PendingEffect>,
+    /// How many periodic reactions fired last tick (set before drain, readable next frame).
+    pub reactions_last_tick: usize,
 }
 
 impl PendingEffects {
@@ -224,6 +226,7 @@ pub fn periodic_reaction_system(
         .buffer
         .sort_unstable_by_key(|p| (p.coord.cx, p.coord.cy, p.coord.cz, p.idx, p.reaction_id.0));
 
+    pending.reactions_last_tick = pending.buffer.len();
     let effects: Vec<_> = pending.buffer.drain(..).collect();
     for pe in effects {
         let Some(&entity) = world_res.chunks.get(&pe.coord) else {
