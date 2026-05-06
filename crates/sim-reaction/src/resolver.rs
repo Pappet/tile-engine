@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 use tile_core::chunk::ChunkData;
 use tile_core::coords::ChunkCoord;
-use tile_core::liquid::LIQ_NONE;
+use tile_core::liquid::{LIQ_NONE, LiquidCollisionEvent, LiquidId};
 use tile_core::material::MaterialRegistry;
 use tile_core::rng::mix_hash;
 use tile_core::world::World;
@@ -26,12 +26,13 @@ pub struct PendingEffects {
 
 // ── Condition evaluator ───────────────────────────────────────────────────────
 
-fn evaluate(
+pub(crate) fn evaluate(
     cond: &Condition,
     chunk: &ChunkData,
     idx: usize,
     material_reg: &MaterialRegistry,
     liquid_reg: &LiquidRegistry,
+    incoming: Option<LiquidId>,
 ) -> bool {
     match cond {
         Condition::TileMaterialIs(mat) => chunk.terrain[idx] == *mat,
@@ -69,29 +70,29 @@ fn evaluate(
                 false
             }
         }
+        Condition::IncomingLiquidIs(liq) => incoming.is_some_and(|i| i == *liq),
         // Boolean
-        Condition::Not(inner) => !evaluate(inner, chunk, idx, material_reg, liquid_reg),
+        Condition::Not(inner) => !evaluate(inner, chunk, idx, material_reg, liquid_reg, incoming),
         Condition::AnyOf(conds) => conds
             .iter()
-            .any(|c| evaluate(c, chunk, idx, material_reg, liquid_reg)),
+            .any(|c| evaluate(c, chunk, idx, material_reg, liquid_reg, incoming)),
         Condition::AllOf(conds) => conds
             .iter()
-            .all(|c| evaluate(c, chunk, idx, material_reg, liquid_reg)),
-        // Not implemented for Periodic trigger
+            .all(|c| evaluate(c, chunk, idx, material_reg, liquid_reg, incoming)),
+        // Not yet implemented
         Condition::NeighborMaterialIs { .. }
         | Condition::NeighborLiquidIs { .. }
         | Condition::AnyNeighborIs(_)
         | Condition::AgeAtLeast { .. }
         | Condition::IsTimeOfDay(_)
         | Condition::DepthBelow(_)
-        | Condition::HasTag(_)
-        | Condition::IncomingLiquidIs(_) => false,
+        | Condition::HasTag(_) => false,
     }
 }
 
 // ── Effect applier ────────────────────────────────────────────────────────────
 
-fn apply_effects(chunk: &mut ChunkData, idx: usize, effects: &[Effect]) {
+pub(crate) fn apply_effects(chunk: &mut ChunkData, idx: usize, effects: &[Effect]) {
     for effect in effects {
         match effect {
             Effect::SetTileMaterial(mat) => {
@@ -181,11 +182,11 @@ pub fn periodic_reaction_system(
                     continue;
                 }
 
-                // Evaluate conditions.
+                // Evaluate conditions (no incoming liquid for Periodic).
                 if !reaction
                     .conditions
                     .iter()
-                    .all(|c| evaluate(c, chunk, idx, &material_reg, &liquid_reg))
+                    .all(|c| evaluate(c, chunk, idx, &material_reg, &liquid_reg, None))
                 {
                     continue;
                 }
@@ -222,6 +223,66 @@ pub fn periodic_reaction_system(
     }
 }
 
+// ── liquid_collision_reaction_system ─────────────────────────────────────────
+
+/// Reads `LiquidCollisionEvent`s emitted by the fluid system and fires matching
+/// `LiquidCollision`-trigger reactions (Bibel §9.4, §10.4).
+///
+/// Runs after `liquid_collision_detect` and before `init_fluid_write_buffers`
+/// so effects are visible to the flow step this tick.
+pub fn liquid_collision_reaction_system(
+    mut events: EventReader<LiquidCollisionEvent>,
+    registry: Res<ReactionRegistry>,
+    world_res: Res<World>,
+    mut chunks: Query<&mut ChunkData>,
+    material_reg: Res<MaterialRegistry>,
+    liquid_reg: Res<LiquidRegistry>,
+) {
+    let collision_ids = registry.by_trigger(&TriggerKind::LiquidCollision);
+    if collision_ids.is_empty() || events.is_empty() {
+        events.clear();
+        return;
+    }
+
+    let tick = world_res.current_tick;
+
+    for event in events.read() {
+        let Some(mut chunk) = chunks.iter_mut().find(|c| c.coord == event.coord) else {
+            continue;
+        };
+
+        for rid in collision_ids {
+            let reaction = match registry.get(*rid) {
+                Some(r) => r,
+                None => continue,
+            };
+
+            if !reaction.conditions.iter().all(|c| {
+                evaluate(
+                    c,
+                    &chunk,
+                    event.idx,
+                    &material_reg,
+                    &liquid_reg,
+                    Some(event.incoming),
+                )
+            }) {
+                continue;
+            }
+
+            if reaction.probability < u16::MAX {
+                let h = mix_hash(event.coord, event.idx, tick, rid.0);
+                if (h & 0xFFFF) >= reaction.probability as u64 {
+                    continue;
+                }
+            }
+
+            let effects = reaction.effects.clone();
+            apply_effects(&mut chunk, event.idx, &effects);
+        }
+    }
+}
+
 // ── ReactionPlugin ────────────────────────────────────────────────────────────
 
 pub struct ReactionPlugin;
@@ -231,6 +292,10 @@ impl bevy_app::Plugin for ReactionPlugin {
         app.init_resource::<ReactionRegistry>();
         app.init_resource::<PendingEffects>();
         app.add_systems(bevy_app::Update, periodic_reaction_system);
+        // liquid_collision_reaction_system must be ordered by the app between
+        // liquid_collision_detect (fluid) and init_fluid_write_buffers (fluid).
+        // Registered here; ordering wired in app/main.rs.
+        app.add_systems(bevy_app::Update, liquid_collision_reaction_system);
     }
 }
 
@@ -462,5 +527,151 @@ mod tests {
         app.update();
         let chunk = app.world().get::<ChunkData>(entity).unwrap();
         assert_eq!(chunk.temp[IDX], 999, "must fire at tick 4");
+    }
+
+    // ── Acceptance Test: Magma + Water → Basalt (Bibel 9.13 §1) ─────────────
+
+    fn make_collision_app() -> App {
+        use bevy_ecs::schedule::IntoSystemConfigs;
+        use sim_fluid::fluid_ca::{
+            init_fluid_write_buffers, liquid_collision_detect, swap_buffers_system,
+        };
+        use sim_fluid::snapshot::{LiquidSnapshot, snapshot_liquid};
+        use tile_core::activity::WakeRequests;
+        use tile_core::liquid::LiquidCollisionEvent;
+
+        let mut app = App::new();
+        app.add_event::<LiquidCollisionEvent>();
+        app.init_resource::<ReactionRegistry>();
+        app.init_resource::<PendingEffects>();
+        app.init_resource::<LiquidRegistry>();
+        app.init_resource::<LiquidSnapshot>();
+        app.init_resource::<WakeRequests>();
+        app.init_resource::<World>();
+        let mut mat_reg = MaterialRegistry::default();
+        for (id, mat) in builtin_materials() {
+            mat_reg.add(id, mat);
+        }
+        app.insert_resource(mat_reg);
+        app.add_systems(
+            bevy_app::Update,
+            (
+                snapshot_liquid,
+                liquid_collision_detect,
+                liquid_collision_reaction_system,
+                init_fluid_write_buffers,
+                swap_buffers_system,
+            )
+                .chain(),
+        );
+        app
+    }
+
+    #[test]
+    fn test_magma_water_collision_makes_basalt() {
+        const MAGMA: LiquidId = LiquidId(2);
+        const WATER: LiquidId = LiquidId(1);
+        const BASALT: MaterialId = MaterialId(7);
+        const MAGMA_IDX: usize = 5 * CHUNK_SIZE + 5;
+        const WATER_IDX: usize = 5 * CHUNK_SIZE + 6; // adjacent right
+
+        let mut app = make_collision_app();
+
+        // Reaction: Magma tile + incoming Water → remove liquid + set Basalt.
+        let reaction = Reaction {
+            name: "magma_water_solidify".to_string(),
+            trigger: crate::Trigger::LiquidCollision,
+            conditions: vec![
+                Condition::TileLiquidIs(MAGMA),
+                Condition::IncomingLiquidIs(WATER),
+            ],
+            effects: vec![
+                Effect::SetLiquid {
+                    kind: LiquidId(0),
+                    amount: 0,
+                    temp: 0,
+                },
+                Effect::SetTileMaterial(BASALT),
+            ],
+            primary_material: None,
+            primary_liquid: Some(MAGMA),
+            min_temperature: None,
+            max_temperature: None,
+            probability: u16::MAX,
+            cooldown_ticks: 0,
+        };
+        app.world_mut()
+            .resource_mut::<ReactionRegistry>()
+            .add(reaction);
+
+        let mut chunk = make_air_chunk(COORD);
+        chunk.liquid_kind[MAGMA_IDX] = MAGMA;
+        chunk.liquid_amount_read[MAGMA_IDX] = 100;
+        chunk.liquid_kind[WATER_IDX] = WATER;
+        chunk.liquid_amount_read[WATER_IDX] = 100;
+        let entity = app.world_mut().spawn(chunk).id();
+
+        app.update();
+
+        let chunk = app.world().get::<ChunkData>(entity).unwrap();
+        assert_eq!(
+            chunk.terrain[MAGMA_IDX], BASALT,
+            "Magma tile must become Basalt on collision with Water"
+        );
+        assert_eq!(
+            chunk.liquid_amount_read[MAGMA_IDX], 0,
+            "Magma liquid must be removed"
+        );
+        assert_eq!(
+            chunk.liquid_kind[MAGMA_IDX],
+            tile_core::liquid::LIQ_NONE,
+            "liquid_kind must be cleared"
+        );
+    }
+
+    #[test]
+    fn test_collision_only_fires_for_matching_incoming() {
+        const MAGMA: LiquidId = LiquidId(2);
+        const OIL: LiquidId = LiquidId(4);
+        const BASALT: MaterialId = MaterialId(7);
+        const MAGMA_IDX: usize = 5 * CHUNK_SIZE + 5;
+        const OIL_IDX: usize = 5 * CHUNK_SIZE + 6;
+
+        let mut app = make_collision_app();
+
+        // Reaction only fires when incoming is WATER — oil should NOT trigger it.
+        let reaction = Reaction {
+            name: "magma_water_solidify".to_string(),
+            trigger: crate::Trigger::LiquidCollision,
+            conditions: vec![
+                Condition::TileLiquidIs(MAGMA),
+                Condition::IncomingLiquidIs(LiquidId(1)), // Water only
+            ],
+            effects: vec![Effect::SetTileMaterial(BASALT)],
+            primary_material: None,
+            primary_liquid: Some(MAGMA),
+            min_temperature: None,
+            max_temperature: None,
+            probability: u16::MAX,
+            cooldown_ticks: 0,
+        };
+        app.world_mut()
+            .resource_mut::<ReactionRegistry>()
+            .add(reaction);
+
+        let mut chunk = make_air_chunk(COORD);
+        chunk.liquid_kind[MAGMA_IDX] = MAGMA;
+        chunk.liquid_amount_read[MAGMA_IDX] = 100;
+        chunk.liquid_kind[OIL_IDX] = OIL; // Oil, not water
+        chunk.liquid_amount_read[OIL_IDX] = 100;
+        let entity = app.world_mut().spawn(chunk).id();
+
+        app.update();
+
+        let chunk = app.world().get::<ChunkData>(entity).unwrap();
+        assert_ne!(
+            chunk.terrain[MAGMA_IDX], BASALT,
+            "Magma must NOT become Basalt when adjacent to Oil (IncomingLiquidIs(Water) fails)"
+        );
     }
 }

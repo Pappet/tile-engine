@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 use tile_core::activity::WakeRequests;
 use tile_core::chunk::ChunkData;
 use tile_core::coords::{CHUNK_AREA, CHUNK_SIZE, ChunkCoord};
-use tile_core::liquid::{LIQ_NONE, LiquidId};
+use tile_core::liquid::{LIQ_NONE, LiquidCollisionEvent, LiquidId};
 use tile_core::material::MAT_AIR;
 
 use crate::LiquidRegistry;
@@ -480,6 +480,59 @@ fn visc_of(reg: &Option<Res<LiquidRegistry>>, id: LiquidId) -> u8 {
     reg.as_ref()
         .and_then(|r| r.get(id))
         .map_or(0, |p| p.viscosity)
+}
+
+/// Bibel §9.4 — emits `LiquidCollisionEvent` for tiles where two different
+/// liquid kinds are adjacent. Runs after sources/drains + snapshot, before flow.
+///
+/// Only intra-chunk adjacency is checked (cross-chunk collisions are P6.4+).
+/// Emits at most one event per tile per tick (first differing neighbor wins).
+pub fn liquid_collision_detect(
+    chunks: Query<&ChunkData>,
+    mut events: EventWriter<LiquidCollisionEvent>,
+) {
+    for chunk in chunks.iter() {
+        let coord = chunk.coord;
+        for idx in 0..CHUNK_AREA {
+            let existing = chunk.liquid_kind[idx];
+            if existing == LIQ_NONE || chunk.liquid_amount_read[idx] == 0 {
+                continue;
+            }
+            let x = idx % CHUNK_SIZE;
+            let y = idx / CHUNK_SIZE;
+
+            let neighbors = [
+                if x > 0 { Some(idx - 1) } else { None },
+                if x + 1 < CHUNK_SIZE {
+                    Some(idx + 1)
+                } else {
+                    None
+                },
+                if y > 0 { Some(idx - CHUNK_SIZE) } else { None },
+                if y + 1 < CHUNK_SIZE {
+                    Some(idx + CHUNK_SIZE)
+                } else {
+                    None
+                },
+            ];
+
+            for nb_idx in neighbors.into_iter().flatten() {
+                let nb_kind = chunk.liquid_kind[nb_idx];
+                if nb_kind != LIQ_NONE
+                    && nb_kind != existing
+                    && chunk.liquid_amount_read[nb_idx] > 0
+                {
+                    events.send(LiquidCollisionEvent {
+                        coord,
+                        idx,
+                        existing,
+                        incoming: nb_kind,
+                    });
+                    break; // one event per tile per tick
+                }
+            }
+        }
+    }
 }
 
 /// Swap read/write buffers on all chunks. Called in PostTick.
