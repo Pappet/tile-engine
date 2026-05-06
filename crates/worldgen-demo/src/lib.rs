@@ -93,7 +93,7 @@ fn gen_demo_chunks(
 /// Determines if a specific world coordinate should be solid Granit.
 fn is_demo_solid(wx: i32, wy: i32, cz: i32) -> bool {
     // Completely outside our demo structure? -> Air
-    if wx < OUTER_LEFT_X || wx > OUTER_RIGHT_X || wy < OUTER_BOTTOM_Y || wy > OUTER_TOP_Y {
+    if !(OUTER_LEFT_X..=OUTER_RIGHT_X).contains(&wx) || !(OUTER_BOTTOM_Y..=OUTER_TOP_Y).contains(&wy) {
         return false;
     }
 
@@ -113,10 +113,8 @@ fn is_demo_solid(wx: i32, wy: i32, cz: i32) -> bool {
     }
 
     // 3. Inner Walls (lower than outer walls)
-    if cz <= INNER_WALL_TOP_Z {
-        if wx == INNER_LEFT_X || wx == INNER_RIGHT_X {
-            return true;
-        }
+    if cz <= INNER_WALL_TOP_Z && (wx == INNER_LEFT_X || wx == INNER_RIGHT_X) {
+        return true;
     }
 
     false
