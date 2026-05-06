@@ -24,6 +24,16 @@ pub struct PendingEffects {
     buffer: Vec<PendingEffect>,
 }
 
+impl PendingEffects {
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+}
+
 // ── Condition evaluator ───────────────────────────────────────────────────────
 
 pub(crate) fn evaluate(
