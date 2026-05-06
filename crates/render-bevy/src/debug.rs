@@ -1,6 +1,5 @@
 use bevy::diagnostic::{
     DiagnosticsStore, EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin,
-    SystemInformationDiagnosticsPlugin,
 };
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, egui};
@@ -35,11 +34,7 @@ fn debug_window(
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
 
-    let frame_ms = diagnostics
-        .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
-        .and_then(|d| d.smoothed())
-        .unwrap_or(0.0)
-        * 1000.0;
+    let frame_ms = if fps > 0.0 { 1000.0 / fps } else { 0.0 };
 
     let entity_count = diagnostics
         .get(&EntityCountDiagnosticsPlugin::ENTITY_COUNT)
