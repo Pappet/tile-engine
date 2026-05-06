@@ -4,6 +4,7 @@ use tile_core::chunk::ChunkData;
 use tile_core::coords::WorldPos;
 use tile_core::liquid::{LIQ_NONE, LiquidId};
 use tile_core::material::MAT_AIR;
+use tile_core::world::World;
 
 use crate::LiquidFlags;
 
@@ -48,6 +49,7 @@ impl persistence::Persistent for LiquidDrain {
 /// Sources inject liquid; drains remove it. Both operate directly on
 /// `liquid_amount_read` so the snapshot sees the result this tick.
 pub fn run_sources_drains(
+    world_res: Res<World>,
     sources: Query<&LiquidSource>,
     drains: Query<&LiquidDrain>,
     mut chunks: Query<&mut ChunkData>,
@@ -55,43 +57,51 @@ pub fn run_sources_drains(
     for source in sources.iter() {
         let (coord, lp) = source.pos.split();
         let idx = lp.index();
-        if let Some(mut chunk) = chunks.iter_mut().find(|c| c.coord == coord) {
-            if chunk.terrain[idx] != MAT_AIR {
-                continue;
-            }
-            let current = chunk.liquid_amount_read[idx];
-            if chunk.pressure_read[idx] >= source.max_pressure && source.max_pressure > 0 {
-                continue;
-            }
-            let new_val = (current as u16 + source.rate as u16).min(255) as u8;
-            chunk.liquid_amount_read[idx] = new_val;
-            if chunk.liquid_kind[idx] == LIQ_NONE {
-                chunk.liquid_kind[idx] = source.kind;
-            }
+        let Some(&entity) = world_res.chunks.get(&coord) else {
+            continue;
+        };
+        let Ok(mut chunk) = chunks.get_mut(entity) else {
+            continue;
+        };
+        if chunk.terrain[idx] != MAT_AIR {
+            continue;
+        }
+        let current = chunk.liquid_amount_read[idx];
+        if chunk.pressure_read[idx] >= source.max_pressure && source.max_pressure > 0 {
+            continue;
+        }
+        let new_val = (current as u16 + source.rate as u16).min(255) as u8;
+        chunk.liquid_amount_read[idx] = new_val;
+        if chunk.liquid_kind[idx] == LIQ_NONE {
+            chunk.liquid_kind[idx] = source.kind;
         }
     }
 
     for drain in drains.iter() {
         let (coord, lp) = drain.pos.split();
         let idx = lp.index();
-        if let Some(mut chunk) = chunks.iter_mut().find(|c| c.coord == coord) {
-            let kind = chunk.liquid_kind[idx];
-            if kind == LIQ_NONE {
-                continue;
-            }
-            let accepted = match &drain.accepts {
-                LiquidFilter::All => true,
-                LiquidFilter::ByFlags(_) => true, // full filter in P4.8 when registry is wired
-            };
-            if !accepted {
-                continue;
-            }
-            let current = chunk.liquid_amount_read[idx];
-            let new_val = current.saturating_sub(drain.rate);
-            chunk.liquid_amount_read[idx] = new_val;
-            if new_val == 0 {
-                chunk.liquid_kind[idx] = LIQ_NONE;
-            }
+        let Some(&entity) = world_res.chunks.get(&coord) else {
+            continue;
+        };
+        let Ok(mut chunk) = chunks.get_mut(entity) else {
+            continue;
+        };
+        let kind = chunk.liquid_kind[idx];
+        if kind == LIQ_NONE {
+            continue;
+        }
+        let accepted = match &drain.accepts {
+            LiquidFilter::All => true,
+            LiquidFilter::ByFlags(_) => true, // full filter in P4.8 when registry is wired
+        };
+        if !accepted {
+            continue;
+        }
+        let current = chunk.liquid_amount_read[idx];
+        let new_val = current.saturating_sub(drain.rate);
+        chunk.liquid_amount_read[idx] = new_val;
+        if new_val == 0 {
+            chunk.liquid_kind[idx] = LIQ_NONE;
         }
     }
 }
@@ -111,6 +121,7 @@ mod tests {
         let mut app = bevy_app::App::new();
         app.init_resource::<crate::snapshot::LiquidSnapshot>();
         app.init_resource::<tile_core::activity::WakeRequests>();
+        app.init_resource::<tile_core::world::World>();
         if with_registry {
             let mut reg = crate::LiquidRegistry::default();
             for (id, props) in crate::builtin_liquids() {
@@ -150,6 +161,10 @@ mod tests {
             cz: 0,
         };
         let entity = app.world_mut().spawn(make_air_chunk(coord)).id();
+        app.world_mut()
+            .resource_mut::<tile_core::world::World>()
+            .chunks
+            .insert(coord, entity);
         app.world_mut().spawn(LiquidSource {
             pos: WorldPos { x: 5, y: 5, z: 0 },
             kind: LiquidId(1),
@@ -181,6 +196,10 @@ mod tests {
         chunk.liquid_kind[idx] = LiquidId(1);
         chunk.liquid_amount_read[idx] = 100;
         let entity = app.world_mut().spawn(chunk).id();
+        app.world_mut()
+            .resource_mut::<tile_core::world::World>()
+            .chunks
+            .insert(coord, entity);
 
         app.world_mut().spawn(LiquidDrain {
             pos: WorldPos { x: 5, y: 5, z: 0 },
@@ -209,7 +228,11 @@ mod tests {
             cy: 0,
             cz: 0,
         };
-        app.world_mut().spawn(make_air_chunk(coord));
+        let chunk_entity = app.world_mut().spawn(make_air_chunk(coord)).id();
+        app.world_mut()
+            .resource_mut::<tile_core::world::World>()
+            .chunks
+            .insert(coord, chunk_entity);
 
         // Magma source at (4, 16) — left side
         app.world_mut().spawn(LiquidSource {

@@ -214,10 +214,12 @@ pub fn periodic_reaction_system(
         .buffer
         .sort_unstable_by_key(|p| (p.coord.cx, p.coord.cy, p.coord.cz, p.idx, p.reaction_id.0));
 
-    // Collect coords to find chunks by coord.
     let effects: Vec<_> = pending.buffer.drain(..).collect();
     for pe in effects {
-        if let Some(mut chunk) = chunks.iter_mut().find(|c| c.coord == pe.coord) {
+        let Some(&entity) = world_res.chunks.get(&pe.coord) else {
+            continue;
+        };
+        if let Ok(mut chunk) = chunks.get_mut(entity) {
             apply_effects(&mut chunk, pe.idx, &pe.effects);
         }
     }
@@ -247,7 +249,10 @@ pub fn liquid_collision_reaction_system(
     let tick = world_res.current_tick;
 
     for event in events.read() {
-        let Some(mut chunk) = chunks.iter_mut().find(|c| c.coord == event.coord) else {
+        let Some(&entity) = world_res.chunks.get(&event.coord) else {
+            continue;
+        };
+        let Ok(mut chunk) = chunks.get_mut(entity) else {
             continue;
         };
 
@@ -383,6 +388,10 @@ mod tests {
         chunk.terrain[42] = IRON_ORE;
         chunk.temp[42] = 1300;
         let entity = app.world_mut().spawn(chunk).id();
+        app.world_mut()
+            .resource_mut::<World>()
+            .chunks
+            .insert(COORD, entity);
 
         app.update();
 
@@ -437,6 +446,10 @@ mod tests {
         chunk.liquid_amount_read[idx] = 100;
         chunk.temp[idx] = -10; // below freezing
         let entity = app.world_mut().spawn(chunk).id();
+        app.world_mut()
+            .resource_mut::<World>()
+            .chunks
+            .insert(COORD, entity);
 
         app.update();
 
@@ -506,6 +519,10 @@ mod tests {
         let mut chunk = make_air_chunk(COORD);
         chunk.terrain[IDX] = IRON_ORE;
         let entity = app.world_mut().spawn(chunk).id();
+        app.world_mut()
+            .resource_mut::<World>()
+            .chunks
+            .insert(COORD, entity);
 
         // tick=0 → fires (0 % 4 == 0)
         app.update();
@@ -610,6 +627,10 @@ mod tests {
         chunk.liquid_kind[WATER_IDX] = WATER;
         chunk.liquid_amount_read[WATER_IDX] = 100;
         let entity = app.world_mut().spawn(chunk).id();
+        app.world_mut()
+            .resource_mut::<World>()
+            .chunks
+            .insert(COORD, entity);
 
         app.update();
 
@@ -665,6 +686,10 @@ mod tests {
         chunk.liquid_kind[OIL_IDX] = OIL; // Oil, not water
         chunk.liquid_amount_read[OIL_IDX] = 100;
         let entity = app.world_mut().spawn(chunk).id();
+        app.world_mut()
+            .resource_mut::<World>()
+            .chunks
+            .insert(COORD, entity);
 
         app.update();
 
