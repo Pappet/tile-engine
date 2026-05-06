@@ -41,13 +41,14 @@ fn debug_window(
         .and_then(|d| d.value())
         .unwrap_or(0.0) as u64;
 
-    // Calculate world stats - only count chunks, skip tile iteration
+    // Calculate world stats
     let mut total_active = 0;
     let mut active_fluid = 0;
     let mut active_temp = 0;
     let mut active_erosion = 0;
     let mut active_reaction = 0;
     let mut dirty_chunks = 0;
+    let mut total_liquid = 0u64;
 
     for chunk in chunks.iter() {
         if !chunk.active.is_empty() {
@@ -68,38 +69,42 @@ fn debug_window(
         if chunk.dirty {
             dirty_chunks += 1;
         }
+        // This is fast in Rust (nanoseconds per chunk)
+        for &amount in chunk.liquid_amount_read.iter() {
+            total_liquid += amount as u64;
+        }
     }
 
     egui::Window::new("Debug")
-        .resizable(false)
+        .resizable(true)
+        .default_width(200.0)
         .show(contexts.ctx_mut(), |ui| {
-            ui.heading("Renderer");
-            ui.label(format!("Z Layer:    {} (Q / E)", active_z.0));
-            ui.separator();
+            ui.collapsing("Performance", |ui| {
+                ui.label(format!("FPS:         {fps:.1}"));
+                ui.label(format!("Frame:       {frame_ms:.2} ms"));
+            });
 
-            ui.heading("Performance");
-            ui.label(format!("FPS:         {fps:.1}"));
-            ui.label(format!("Frame:       {frame_ms:.2} ms"));
-            ui.separator();
+            ui.collapsing("World", |ui| {
+                ui.label(format!("Tick:        {}", world.current_tick));
+                ui.label(format!("Z Layer:     {}", active_z.0));
+                ui.label(format!("Chunks:      {}", world.chunks.len()));
+                ui.label(format!("  Dirty:     {dirty_chunks}"));
+                ui.label(format!("  Active:    {total_active}"));
+                if total_active > 0 {
+                    ui.label(format!("    Fluid:   {active_fluid}"));
+                    ui.label(format!("    Temp:    {active_temp}"));
+                    ui.label(format!("    Erosion: {active_erosion}"));
+                    ui.label(format!("    React:   {active_reaction}"));
+                }
+                ui.label(format!("Entities:    {entity_count}"));
+                ui.label(format!("Liquid Sum:  {total_liquid}"));
+            });
 
-            ui.heading("World");
-            ui.label(format!("Tick:        {}", world.current_tick));
-            ui.label(format!("Chunks:      {}", world.chunks.len()));
-            ui.label(format!("  Dirty:     {dirty_chunks}"));
-            ui.label(format!("  Active:    {total_active}"));
-            if total_active > 0 {
-                ui.label(format!("    Fluid:   {active_fluid}"));
-                ui.label(format!("    Temp:    {active_temp}"));
-                ui.label(format!("    Erosion: {active_erosion}"));
-                ui.label(format!("    React:   {active_reaction}"));
-            }
-            ui.label(format!("Entities:    {entity_count}"));
-            ui.separator();
-
-            ui.heading("Sim Internals");
-            let pending_react = pending_effects.map(|p| p.len()).unwrap_or(0);
-            let pending_wake = wake_requests.map(|w| w.pending.len()).unwrap_or(0);
-            ui.label(format!("Pending React: {pending_react}"));
-            ui.label(format!("Pending Wake:  {pending_wake}"));
+            ui.collapsing("Sim Internals", |ui| {
+                let pending_react = pending_effects.map(|p| p.len()).unwrap_or(0);
+                let pending_wake = wake_requests.map(|w| w.pending.len()).unwrap_or(0);
+                ui.label(format!("Pending React: {pending_react}"));
+                ui.label(format!("Pending Wake:  {pending_wake}"));
+            });
         });
 }
