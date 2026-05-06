@@ -20,6 +20,7 @@ pub struct FluidPlugin;
 impl bevy_app::Plugin for FluidPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         use bevy_ecs::schedule::IntoSystemConfigs;
+        app.add_event::<tile_core::liquid::LiquidCollisionEvent>();
         app.init_resource::<snapshot::LiquidSnapshot>();
         app.init_resource::<tile_core::activity::WakeRequests>();
         app.add_systems(
@@ -27,6 +28,7 @@ impl bevy_app::Plugin for FluidPlugin {
             (
                 source_drain::run_sources_drains,
                 snapshot::snapshot_liquid,
+                fluid_ca::liquid_collision_detect,
                 fluid_ca::init_fluid_write_buffers,
                 fluid_ca::pressure_propagation,
                 fluid_ca::fluid_step_local,
