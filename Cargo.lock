@@ -185,6 +185,7 @@ dependencies = [
  "puffin 0.19.1",
  "puffin_http",
  "render_bevy",
+ "sim-reaction",
  "sim_fluid",
  "tile_core",
  "worldgen_api",

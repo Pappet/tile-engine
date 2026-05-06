@@ -3,9 +3,11 @@ use persistence::{
     LoadRequest, SaveLayout, SaveRequest, SerializedEntity, load_entities, save_entities,
 };
 use sim_fluid::{FluidPlugin, LiquidDrain, LiquidRegistry, LiquidSource, builtin_liquids};
+use sim_reaction::resolver::{ReactionPlugin, liquid_collision_reaction_system};
+use sim_reaction::{Condition, Effect, Reaction, ReactionRegistry, Trigger};
 use tile_core::chunk::ChunkData;
-use tile_core::liquid::LiquidId;
-use tile_core::material::MAT_AIR;
+use tile_core::liquid::{LIQ_NONE, LiquidId};
+use tile_core::material::{MAT_AIR, MaterialId};
 
 fn main() {
     let mut app = App::new();
@@ -30,10 +32,18 @@ fn main() {
 
     app.add_plugins(tile_core::activity::CorePlugin);
     app.add_plugins(FluidPlugin);
+    app.add_plugins(ReactionPlugin);
     app.add_plugins(render_bevy::RenderPlugin);
     app.add_plugins(worldgen_demo::DemoWorldgenPlugin);
     app.add_plugins(persistence::PersistencePlugin);
     app.add_systems(Update, (save_entities_system, load_entities_system));
+    // Wire collision resolver between detect and swap (Bibel §9.12 step 3).
+    app.add_systems(
+        Update,
+        liquid_collision_reaction_system
+            .after(sim_fluid::fluid_ca::liquid_collision_detect)
+            .before(sim_fluid::fluid_ca::swap_buffers_system),
+    );
 
     app.init_resource::<tile_core::world::World>();
 
@@ -57,7 +67,7 @@ fn main() {
     }
     app.insert_resource(liquid_reg);
 
-    app.add_systems(Startup, spawn_liquid_sources);
+    app.add_systems(Startup, (spawn_liquid_sources, register_reactions));
     app.add_systems(PostStartup, clear_source_terrain);
     app.add_systems(Update, dummy_system);
 
@@ -160,6 +170,32 @@ fn load_entities_system(
             }
         }
     }
+}
+
+fn register_reactions(mut registry: ResMut<ReactionRegistry>) {
+    // Magma + Water → Basalt (Bibel §9.13 §1)
+    registry.add(Reaction {
+        name: "magma_water_solidify".to_string(),
+        trigger: Trigger::LiquidCollision,
+        conditions: vec![
+            Condition::TileLiquidIs(LiquidId(2)),     // existing = Magma
+            Condition::IncomingLiquidIs(LiquidId(1)), // incoming = Water
+        ],
+        effects: vec![
+            Effect::SetLiquid {
+                kind: LIQ_NONE,
+                amount: 0,
+                temp: 0,
+            },
+            Effect::SetTileMaterial(MaterialId(5)), // Basalt
+        ],
+        primary_material: None,
+        primary_liquid: Some(LiquidId(2)),
+        min_temperature: None,
+        max_temperature: None,
+        probability: u16::MAX,
+        cooldown_ticks: 0,
+    });
 }
 
 #[cfg(feature = "profile")]
