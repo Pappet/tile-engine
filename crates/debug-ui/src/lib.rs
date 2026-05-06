@@ -6,17 +6,24 @@ use bevy::diagnostic::{
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, egui};
 use render_bevy::ActiveZLayer;
+use render_bevy::camera::TileCamera;
 use sim_fluid::LiquidRegistry;
 use sim_reaction::resolver::PendingEffects;
 use tile_core::activity::WakeRequests;
 use tile_core::chunk::ChunkData;
+use tile_core::coords::WorldPos;
 use tile_core::liquid::{LIQ_NONE, LiquidId};
+use tile_core::material::{MaterialId, MaterialRegistry};
 
 const HISTORY_LEN: usize = 60;
 
 /// Rolling reaction-rate history (one entry per tick, last 60).
 #[derive(Resource, Default)]
 struct ReactionHistory(VecDeque<usize>);
+
+/// Last tile clicked by the user for inspection.
+#[derive(Resource, Default)]
+pub struct InspectedTile(pub Option<WorldPos>);
 
 pub struct DebugUiPlugin;
 
@@ -26,8 +33,15 @@ impl Plugin for DebugUiPlugin {
             .add_plugins(FrameTimeDiagnosticsPlugin)
             .add_plugins(EntityCountDiagnosticsPlugin)
             .init_resource::<ReactionHistory>()
+            .init_resource::<InspectedTile>()
             .add_systems(Update, update_reaction_history)
-            .add_systems(Update, debug_window.after(update_reaction_history));
+            .add_systems(Update, tile_click_system)
+            .add_systems(
+                Update,
+                debug_window
+                    .after(update_reaction_history)
+                    .after(tile_click_system),
+            );
     }
 }
 
@@ -42,6 +56,39 @@ fn update_reaction_history(
     history.0.push_back(count);
 }
 
+fn tile_click_system(
+    buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    cameras: Query<(&Camera, &GlobalTransform), With<TileCamera>>,
+    active_z: Res<ActiveZLayer>,
+    mut inspected: ResMut<InspectedTile>,
+) {
+    if !buttons.just_pressed(MouseButton::Left) {
+        return;
+    }
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
+    let Ok((camera, camera_transform)) = cameras.get_single() else {
+        return;
+    };
+    let Some(cursor_pos) = window.cursor_position() else {
+        inspected.0 = None;
+        return;
+    };
+    if let Some(world_pos) = camera.viewport_to_world_2d(camera_transform, cursor_pos) {
+        let tile_x = (world_pos.x / 16.0).floor() as i32;
+        let tile_y = (world_pos.y / 16.0).floor() as i32;
+        inspected.0 = Some(WorldPos {
+            x: tile_x,
+            y: tile_y,
+            z: active_z.0,
+        });
+    } else {
+        inspected.0 = None;
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn debug_window(
     mut contexts: EguiContexts,
@@ -53,6 +100,8 @@ fn debug_window(
     reaction_history: Res<ReactionHistory>,
     chunks: Query<&ChunkData>,
     liquid_reg: Option<Res<LiquidRegistry>>,
+    inspected: Res<InspectedTile>,
+    material_reg: Option<Res<MaterialRegistry>>,
 ) {
     let fps = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
@@ -132,6 +181,48 @@ fn debug_window(
                 };
                 ui.label(format!("Pending:     {pending_react}"));
                 ui.label(format!("Rate (60t):  {avg:.1}/tick"));
+            });
+
+            ui.collapsing("Inspector", |ui| {
+                if let Some(pos) = inspected.0 {
+                    ui.label(format!("Pos: ({}, {}, {})", pos.x, pos.y, pos.z));
+                    let (coord, lp) = pos.split();
+                    let idx = lp.index();
+                    if let Some(&entity) = world.chunks.get(&coord) {
+                        if let Ok(chunk) = chunks.get(entity) {
+                            let mat_id: MaterialId = chunk.terrain[idx];
+                            let mat_name = material_reg
+                                .as_ref()
+                                .and_then(|r| r.get(mat_id))
+                                .map(|m| m.name.as_str())
+                                .unwrap_or("?");
+                            ui.label(format!("Terrain:    {:>3} \"{}\"", mat_id.0, mat_name));
+
+                            let liq_id = chunk.liquid_kind[idx];
+                            if liq_id == LIQ_NONE || chunk.liquid_amount_read[idx] == 0 {
+                                ui.label("Liquid:     none");
+                            } else {
+                                let liq_name = liquid_reg
+                                    .as_ref()
+                                    .and_then(|r| r.get(liq_id))
+                                    .map(|p| p.name.as_str())
+                                    .unwrap_or("?");
+                                ui.label(format!("Liquid:     {:>3} \"{}\"", liq_id.0, liq_name));
+                                ui.label(format!("Amount:     {}", chunk.liquid_amount_read[idx]));
+                                ui.label(format!("Liq temp:   {}", chunk.liquid_temp_read[idx]));
+                            }
+                            ui.label(format!("Pressure:   {}", chunk.pressure_read[idx]));
+                            ui.label(format!("Tile temp:  {}", chunk.temp[idx]));
+                            ui.label(format!("Dirty:      {}", chunk.dirty));
+                        } else {
+                            ui.label("(chunk entity not found)");
+                        }
+                    } else {
+                        ui.label("(no chunk at position)");
+                    }
+                } else {
+                    ui.label("Click a tile to inspect.");
+                }
             });
         });
 }
