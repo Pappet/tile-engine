@@ -1202,6 +1202,146 @@ aber keine dieser Crates darf von `debug-ui` abhängen.
 
 ---
 
+## Phase 14 – Renderer: Visuelle Tiefe und Feedback
+
+Rein visuelle Erweiterungen des Renderers ohne Sim-Änderungen. Alle Pakete
+berühren nur `crates/render-bevy/`. Sim-State wird ausschliesslich gelesen,
+nie geschrieben.
+
+**Schichtprinzip:** `render-bevy` bleibt unterhalb von `debug-ui`. Kein
+neuer Bevy-ECS-State; alle Daten kommen aus vorhandenen `ChunkData`-Feldern.
+
+---
+
+### P14.1 – Tiefendurchblick (Depth Peeking)
+
+**Ziel:** AIR-Tiles auf der aktiven Z-Ebene zeigen den Tile darunter –
+gedimmt je Tiefenstufe. Gruben, Klippen und Höhlen wirken dreidimensional.
+
+**Bibel-Referenz:** Sektion 3.2 (Renderer liest ChunkData), Sektion 5 (Koordinaten).
+
+**Inputs:** P2.1 (Renderer vorhanden).
+
+**Liefergegenstände:**
+- `tile_color` (in `render_bevy/src/lib.rs`) nimmt zusätzlich `Res<World>`
+  und `Query<&ChunkData>` für Lookups auf Z-1 und Z-2.
+- Wenn aktiver Tile AIR ist: Farbe des Tile bei Z-1, multipliziert mit
+  Dimm-Faktor `DEPTH_DIM_1 = 0.55`. Wenn Z-1 ebenfalls AIR: Farbe bei Z-2,
+  Faktor `DEPTH_DIM_2 = 0.30`. Tiefer als 2 Ebenen → Schwarz (`Color::NONE`).
+- Atmospheric Tint: Tiefere Ebenen erhalten einen minimalen Blau-/Dunkel-Shift
+  (`+5u8` auf B-Kanal, `-10u8` auf R/G-Kanal pro Stufe, clamped).
+- LiquidSnapshot wird **nicht** verwendet – direkte `chunks.get(entity)`-
+  Lookups über `World.chunks` (read-only, kein Sim-Zugriff).
+- Bestehende Tile-Update-Logik (changed chunks) muss ebenfalls mit dem
+  neuen Tiefenpfad umgehen: wenn Z-1/Z-2 ChunkData sich ändert, werden
+  betroffene Z-Ebene-Tiles neu gezeichnet.
+
+**Akzeptanzkriterien:**
+- Grube (2 AIR-Ebenen über Granit-Boden): Boden sichtbar und deutlich
+  dunkler als Tiles auf gleicher Ebene.
+- Stehende Flüssigkeit an der Oberfläche verdeckt Tiefendurchblick (kein
+  Durchschauen durch opake Liquids).
+- FPS-Einbruch bei 6×6 Chunks aktiv: unter 5 % gegenüber Basis (messen
+  mit Puffin oder Debug-Panel).
+
+**Out-of-Scope:** Shader-basierte Lichtberechnung, Ray-Casting.
+
+---
+
+### P14.2 – Liquid-Amount-Transparenz
+
+**Ziel:** Flaches Wasser ist semitransparent; volles Tile ist opak.
+Kombiniert mit P14.1: durch seichtes Wasser sieht man den Boden darunter.
+
+**Bibel-Referenz:** Sektion 9.1 (liquid_amount, Wertebereich 0–255).
+
+**Inputs:** P14.1.
+
+**Liefergegenstände:**
+- Alpha-Mapping in `tile_color`: `liquid_amount_read[idx]` → Alpha.
+  Formel: `alpha = (amount as f32 / 255.0 * 0.75 + 0.25).min(1.0)` – d.h.
+  Amount 0 nie sichtbar, Amount 255 = 94 % opak (leicht transparent, kein
+  harter Schnitt).
+- Liquids mit `emits_light > 0` (Magma) bleiben immer opak (alpha = 1.0),
+  da Glut-Effekt sonst zerstört wird.
+- Pressure-Glow: `pressure_read[idx]` (0–255) steigert Farbintensität des
+  Liquids leicht: `color * (1.0 + pressure as f32 / 255.0 * 0.4)`, RGB
+  clamped auf 1.0. Tiefer Ozean wirkt satter/dunkler, Oberfläche heller.
+
+**Akzeptanzkriterien:**
+- Shallow-Wasser (Amount ≤ 64) zeigt Boden/Tiefenebene durch Transparenz.
+- Volles Wasser-Tile (Amount 255) ist nahezu opak.
+- Magma-Tile bleibt immer vollständig sichtbar, unabhängig von Amount.
+- Hochdruck-Liquid (Pressure 200+) sichtbar satter als Niederdruck.
+
+**Out-of-Scope:** UV-Offset-Shader für Fliess-Animation (erfordert WGSL).
+
+---
+
+### P14.3 – Emits-Light Glow-Propagation
+
+**Ziel:** Leuchtende Liquids (Magma, Lava) färben benachbarte AIR-Tiles
+auf gleicher Z-Ebene ein. Höhlen mit Magmaader leuchten orange.
+
+**Bibel-Referenz:** Sektion 9.8 (emits_light-Feld in LiquidProps).
+
+**Inputs:** P14.2.
+
+**Liefergegenstände:**
+- Zweiter Pass in `render_chunks_system` (oder separates System
+  `light_pass_system` nach `render_chunks_system`): iteriert alle Tiles
+  auf aktiver Z, sammelt Lichtquellen (Tiles mit `emits_light > 0`).
+- Für jeden AIR-Nachbar (4-direktional, innerhalb Chunk + Nachbarchunk via
+  `World.chunks`) wird Sprite-Farbe additiv mit gedimmtem Lichtfarbton
+  überlagert: `light_color * (emits_light as f32 / 255.0) * FALLOFF`,
+  wobei `FALLOFF = 0.6` pro Tile Abstand (max 3 Tiles Reichweite).
+- Licht-Overlay als eigene semi-transparente Sprite-Ebene
+  (`Transform::from_xyz(x, y, 1.0)`) über dem Terrain-Sprite – kein
+  Mutieren der Terrain-Sprite-Farbe direkt.
+- `LightOverlay`-Component markiert diese Sprites für gezielte Updates.
+
+**Akzeptanzkriterien:**
+- Magma-Tile: mindestens 2 Tile Radius rund herum leicht orange-leuchtend.
+- AIR-Tiles ohne Nachbar-Lichtquellen: unverändert (kein falscher Tint).
+- Performance: kein spürbarer FPS-Einbruch bei ≤ 10 Magma-Tiles im
+  sichtbaren Bereich.
+
+**Out-of-Scope:** Licht durch Wände (Raycast), dynamische Schatten,
+Licht auf Z-1-Ebene (nur aktive Z).
+
+---
+
+### P14.4 – Hover-Highlight und Cursor-Tile
+
+**Ziel:** Tile unter dem Mauszeiger wird subtil hervorgehoben – gibt
+präzises Feedback welches Tile angeklickt wird, ohne den Inspector zu öffnen.
+
+**Bibel-Referenz:** Sektion 3 (Renderer), P13.3 (InspectedTile-Resource).
+
+**Inputs:** P13.3, P14.1.
+
+**Liefergegenstände:**
+- Neue Resource `HoveredTile(Option<WorldPos>)` in `render_bevy`
+  (analog `InspectedTile` in `debug-ui`, aber nur hover – kein Klick nötig).
+- System `hover_tile_system` in `render_bevy`: liest Cursor-Position +
+  `ActiveZLayer` + Camera-Transform, schreibt `HoveredTile` jeden Frame.
+  Identische Koordinaten-Logik wie P13.3's `tile_click_system`.
+- Highlight-Sprite (1×1 Tile, weisse Outline oder 20 % weisser Overlay-Tint,
+  `Transform z = 2.0`) folgt `HoveredTile`. Kein Highlight ausserhalb
+  Weltgrenzen.
+- `HoveredTile` ist `pub` – `debug-ui` kann sie lesen (z.B. für Tooltip
+  ohne Klick in P13.3-Panel).
+
+**Akzeptanzkriterien:**
+- Hover-Highlight folgt Maus frame-genau bei allen Zoom-Stufen.
+- Kein Highlight wenn Cursor ausserhalb des Fensters oder über UIi-Element.
+- `InspectedTile` (Klick) und `HoveredTile` (Hover) sind unabhängig –
+  Hover-Bewegen löscht nicht den geklickten Inspector.
+
+**Out-of-Scope:** Multi-Tile-Cursor, Rechteck-Selektion.
+
+---
+
 
 
 Diese Phase ist offen und wird nach Bedarf gefüllt. Mögliche Pakete:
@@ -1237,6 +1377,9 @@ P0.1 ──┬─ P0.2
                                                           P13.1 ───────┘    P7.1 ─ P7.2 ─ P7.3 ──┘
                                                           P13.2 ─ P13.3 ─ P13.4
                                                                   │
+                                                          P14.1 ─ P14.2 ─ P14.3
+                                                          P14.4 (nach P13.3 + P14.1)
+                                                                  │
                                                           P8.1 ──┤
                                                           P8.2 ─ P8.3
                                                                   │
@@ -1265,6 +1408,11 @@ Pakete, die parallel an verschiedene Agenten gehen können:
 **Gleichzeitig nach P6.3 möglich:**
 - P13.1 (debug-ui Extraktion) ist unabhängig von P6.4+, kann jetzt gestartet werden.
 - P13.2, P13.3, P13.4 sind nach P13.1 untereinander unabhängig (parallel durchführbar).
+
+**Gleichzeitig nach P2.1 möglich:**
+- P14.1 (Depth Peeking) ist unabhängig von Sim-Phasen, nur Renderer.
+- P14.2 folgt direkt auf P14.1 (kleiner Aufbau).
+- P14.4 kann parallel zu P14.2/P14.3 entwickelt werden (benötigt nur P13.3 + P14.1).
 
 **Gleichzeitig nach P6.4 möglich:**
 - P7.1 (Stains), P8.1 (Hydrologie), P9.1 (Sediment) sind unabhängig.
