@@ -67,6 +67,30 @@ impl LiquidSnapshot {
         .any(|nb| self.amounts.contains_key(nb))
     }
 
+    /// True if any of the 4 horizontal neighbor chunks have non-zero liquid.
+    pub fn has_any_neighbor_with_liquid(&self, coord: ChunkCoord) -> bool {
+        [
+            ChunkCoord {
+                cx: coord.cx + 1,
+                ..coord
+            },
+            ChunkCoord {
+                cx: coord.cx - 1,
+                ..coord
+            },
+            ChunkCoord {
+                cy: coord.cy + 1,
+                ..coord
+            },
+            ChunkCoord {
+                cy: coord.cy - 1,
+                ..coord
+            },
+        ]
+        .iter()
+        .any(|nb| self.chunk_has_liquid(*nb))
+    }
+
     /// True if chunk above (cz+1) or below (cz-1) exists in the snapshot.
     pub fn has_vertical_neighbor(&self, coord: ChunkCoord) -> bool {
         let above = ChunkCoord {
@@ -82,26 +106,43 @@ impl LiquidSnapshot {
 }
 
 /// PreTick system: freeze liquid_amount_read, liquid_kind, and terrain from every chunk.
+///
+/// Uses entry-based insertion to reuse existing heap allocations across ticks,
+/// avoiding ~4 Box alloc/dealloc per chunk per tick.
 pub fn snapshot_liquid(mut snapshot: ResMut<LiquidSnapshot>, chunks: Query<&ChunkData>) {
-    snapshot.amounts.clear();
-    snapshot.kinds.clear();
-    snapshot.terrain.clear();
-    snapshot.pressures.clear();
+    let mut seen = std::collections::HashSet::with_capacity(chunks.iter().len());
+
     for chunk in chunks.iter() {
-        let mut amounts = Box::new([0u8; CHUNK_AREA]);
-        amounts.copy_from_slice(&*chunk.liquid_amount_read);
-        snapshot.amounts.insert(chunk.coord, amounts);
+        seen.insert(chunk.coord);
 
-        let mut kinds = Box::new([LIQ_NONE; CHUNK_AREA]);
-        kinds.copy_from_slice(&*chunk.liquid_kind);
-        snapshot.kinds.insert(chunk.coord, kinds);
+        snapshot
+            .amounts
+            .entry(chunk.coord)
+            .or_insert_with(|| Box::new([0u8; CHUNK_AREA]))
+            .copy_from_slice(&*chunk.liquid_amount_read);
 
-        let mut terrain = Box::new([MAT_AIR; CHUNK_AREA]);
-        terrain.copy_from_slice(&*chunk.terrain);
-        snapshot.terrain.insert(chunk.coord, terrain);
+        snapshot
+            .kinds
+            .entry(chunk.coord)
+            .or_insert_with(|| Box::new([LIQ_NONE; CHUNK_AREA]))
+            .copy_from_slice(&*chunk.liquid_kind);
 
-        let mut pressures = Box::new([0u8; CHUNK_AREA]);
-        pressures.copy_from_slice(&*chunk.pressure_read);
-        snapshot.pressures.insert(chunk.coord, pressures);
+        snapshot
+            .terrain
+            .entry(chunk.coord)
+            .or_insert_with(|| Box::new([MAT_AIR; CHUNK_AREA]))
+            .copy_from_slice(&*chunk.terrain);
+
+        snapshot
+            .pressures
+            .entry(chunk.coord)
+            .or_insert_with(|| Box::new([0u8; CHUNK_AREA]))
+            .copy_from_slice(&*chunk.pressure_read);
     }
+
+    // Remove entries for chunks that no longer exist.
+    snapshot.amounts.retain(|k, _| seen.contains(k));
+    snapshot.kinds.retain(|k, _| seen.contains(k));
+    snapshot.terrain.retain(|k, _| seen.contains(k));
+    snapshot.pressures.retain(|k, _| seen.contains(k));
 }

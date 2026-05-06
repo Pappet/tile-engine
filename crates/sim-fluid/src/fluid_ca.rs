@@ -63,6 +63,12 @@ pub fn flow_with_pressure(
 pub fn pressure_propagation(mut chunks: Query<&mut ChunkData>, snapshot: Res<LiquidSnapshot>) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
+        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
+        if !has_liquid && !snapshot.has_any_neighbor_with_liquid(coord) {
+            chunk.pressure_write.fill(0);
+            continue;
+        }
+
         for i in 0..CHUNK_AREA {
             if chunk.terrain[i] != MAT_AIR || chunk.liquid_amount_read[i] == 0 {
                 chunk.pressure_write[i] = 0;

@@ -8,6 +8,7 @@ use sim_reaction::{Condition, Effect, Reaction, ReactionRegistry, Trigger};
 use tile_core::chunk::ChunkData;
 use tile_core::liquid::{LIQ_NONE, LiquidId};
 use tile_core::material::{MAT_AIR, MaterialId};
+use tile_core::world::World;
 
 fn main() {
     let mut app = App::new();
@@ -102,11 +103,18 @@ fn spawn_liquid_sources(mut commands: Commands) {
 }
 
 /// Force-clear terrain at every LiquidSource position so sources are never blocked by worldgen.
-fn clear_source_terrain(sources: Query<&LiquidSource>, mut chunks: Query<&mut ChunkData>) {
+fn clear_source_terrain(
+    sources: Query<&LiquidSource>,
+    world_res: Res<World>,
+    mut chunks: Query<&mut ChunkData>,
+) {
     for source in sources.iter() {
         let (coord, lp) = source.pos.split();
         let idx = lp.index();
-        if let Some(mut chunk) = chunks.iter_mut().find(|c| c.coord == coord) {
+        let Some(&entity) = world_res.chunks.get(&coord) else {
+            continue;
+        };
+        if let Ok(mut chunk) = chunks.get_mut(entity) {
             chunk.terrain[idx] = MAT_AIR;
         }
     }
