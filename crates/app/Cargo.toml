@@ -14,6 +14,7 @@ worldgen_api = { path = "../worldgen-api" }
 worldgen_earthlike = { path = "../worldgen-earthlike" }
 worldgen_demo = { path = "../worldgen-demo" }
 persistence = { path = "../persistence" }
+sim_reaction = { path = "../sim-reaction", package = "sim-reaction" }
 
 [features]
 profile = ["dep:puffin", "dep:puffin_http"]

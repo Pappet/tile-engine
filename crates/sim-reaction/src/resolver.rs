@@ -292,10 +292,10 @@ impl bevy_app::Plugin for ReactionPlugin {
         app.init_resource::<ReactionRegistry>();
         app.init_resource::<PendingEffects>();
         app.add_systems(bevy_app::Update, periodic_reaction_system);
-        // liquid_collision_reaction_system must be ordered by the app between
-        // liquid_collision_detect (fluid) and init_fluid_write_buffers (fluid).
-        // Registered here; ordering wired in app/main.rs.
-        app.add_systems(bevy_app::Update, liquid_collision_reaction_system);
+        // liquid_collision_reaction_system is NOT added here because it needs
+        // explicit ordering relative to FluidPlugin systems (after
+        // liquid_collision_detect, before swap_buffers_system). Wire it in
+        // app/main.rs with .after()/.before() constraints.
     }
 }
 
