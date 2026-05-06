@@ -9,6 +9,7 @@ Bevy-based voxel tile engine with fluid and reaction simulation.
 - Core data model with chunks and coordinates.
 - Multi-rate simulation (fluid, thermal, reaction).
 - Worldgen via Bevy plugins.
+- Expanded Debug Menu with performance and world statistics.
 
 ## Quickstart Guide
 

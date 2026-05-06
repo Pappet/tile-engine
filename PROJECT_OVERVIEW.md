@@ -24,6 +24,7 @@ Check `ARCHITEKTUR.md` for full truth.
 ## Dependencies
 - Bevy: Core ECS / rendering.
 - Serde/Bincode: Save/Load.
+- sysinfo: System diagnostics (CPU/Memory).
 
 ## Additional References
 - ARCHITEKTUR.md
