@@ -3,8 +3,7 @@ use bevy::diagnostic::{
 };
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, egui};
-
-use crate::ActiveZLayer;
+use render_bevy::ActiveZLayer;
 use sim_reaction::resolver::PendingEffects;
 use tile_core::activity::WakeRequests;
 

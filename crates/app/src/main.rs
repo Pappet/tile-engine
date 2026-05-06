@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use debug_ui::DebugUiPlugin;
 use persistence::{
     LoadRequest, SaveLayout, SaveRequest, SerializedEntity, load_entities, save_entities,
 };
@@ -35,6 +36,7 @@ fn main() {
     app.add_plugins(FluidPlugin);
     app.add_plugins(ReactionPlugin);
     app.add_plugins(render_bevy::RenderPlugin);
+    app.add_plugins(DebugUiPlugin);
     app.add_plugins(worldgen_demo::DemoWorldgenPlugin);
     app.add_plugins(persistence::PersistencePlugin);
     app.add_systems(Update, (save_entities_system, load_entities_system));
@@ -51,7 +53,7 @@ fn main() {
     // Configure Worldgen
     app.insert_resource(worldgen_api::WorldgenConfig {
         seed: 123456789,
-        bounds_radius: Some(2), // 2x2 chunk bounds radius -> 4x4 chunks (16 chunks)
+        bounds_radius: Some(3), // Increase bounds for more zones
     });
 
     // Initialize MaterialRegistry with builtin materials
@@ -68,38 +70,33 @@ fn main() {
     }
     app.insert_resource(liquid_reg);
 
-    app.add_systems(Startup, (spawn_liquid_sources, register_reactions));
+    app.add_systems(Startup, (spawn_demo_entities, register_reactions));
     app.add_systems(PostStartup, clear_source_terrain);
     app.add_systems(Update, dummy_system);
 
     app.run();
 }
 
-fn spawn_liquid_sources(mut commands: Commands) {
-    // Demo basins: left=Magma, middle=Water, right=Oil.
-    let [magma_pos, water_pos, oil_pos] = worldgen_demo::demo_source_positions();
+fn spawn_demo_entities(mut commands: Commands) {
+    let entities = worldgen_demo::demo_showcase_entities();
 
-    commands.spawn(LiquidSource {
-        pos: magma_pos,
-        kind: LiquidId(2), // Magma — visc=200, glows
-        rate: 5,
-        temperature: 1300,
-        max_pressure: 200,
-    });
-    commands.spawn(LiquidSource {
-        pos: water_pos,
-        kind: LiquidId(1), // Water — visc=10
-        rate: 5,
-        temperature: 20,
-        max_pressure: 255,
-    });
-    commands.spawn(LiquidSource {
-        pos: oil_pos,
-        kind: LiquidId(4), // Oil — visc=40
-        rate: 5,
-        temperature: 20,
-        max_pressure: 255,
-    });
+    for (pos, kind, rate, temp) in entities.sources {
+        commands.spawn(LiquidSource {
+            pos,
+            kind,
+            rate,
+            temperature: temp,
+            max_pressure: 255,
+        });
+    }
+
+    for (pos, rate) in entities.drains {
+        commands.spawn(LiquidDrain {
+            pos,
+            rate,
+            accepts: sim_fluid::LiquidFilter::All,
+        });
+    }
 }
 
 /// Force-clear terrain at every LiquidSource position so sources are never blocked by worldgen.

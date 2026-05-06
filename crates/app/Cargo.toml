@@ -9,6 +9,7 @@ puffin = { workspace = true, optional = true }
 puffin_http = { workspace = true, optional = true }
 tile_core = { path = "../core" }
 render_bevy = { path = "../render-bevy" }
+debug_ui = { path = "../debug-ui", package = "debug-ui" }
 sim_fluid = { path = "../sim-fluid" }
 worldgen_api = { path = "../worldgen-api" }
 worldgen_earthlike = { path = "../worldgen-earthlike" }
