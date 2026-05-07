@@ -248,7 +248,10 @@ impl<'a> ChunkNeighborhood<'a> {
                 cy: center.coord.cy + dy,
                 cz: center.coord.cz + dz,
             };
-            world.chunks.get(&coord).and_then(|&e| all_chunks.get(e).ok())
+            world
+                .chunks
+                .get(&coord)
+                .and_then(|&e| all_chunks.get(e).ok())
         };
 
         Self {
