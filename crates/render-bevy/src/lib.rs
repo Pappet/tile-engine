@@ -130,8 +130,16 @@ fn render_chunks_system(
             continue;
         };
 
-        if let Some(&entity) = world.chunks.get(&target_coord) {
-            needs_update.insert(entity);
+        // Flag chunk + 4 cardinal neighbors so cross-chunk light glow redraws correctly.
+        for (dcx, dcy) in [(0i32, 0i32), (1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let neighbor = ChunkCoord {
+                cx: target_coord.cx + dcx,
+                cy: target_coord.cy + dcy,
+                cz: target_coord.cz,
+            };
+            if let Some(&entity) = world.chunks.get(&neighbor) {
+                needs_update.insert(entity);
+            }
         }
     }
 
@@ -240,7 +248,67 @@ fn background_rgba(
     [0, 0, 0, 0]
 }
 
-/// Final tile colour: liquid composited over background with amount-driven alpha and pressure glow.
+/// Additive light contribution from emissive liquid sources within 3 tiles (4-directional).
+/// Returns `[r, g, b]` glow to add to the tile colour. Only called for AIR-terrain tiles.
+fn compute_light_glow(
+    idx: usize,
+    chunk: &ChunkData,
+    world: &World,
+    all_chunks: &Query<&ChunkData>,
+    liquid_reg: &Option<Res<LiquidRegistry>>,
+) -> [u8; 3] {
+    let lx = (idx % CHUNK_SIZE) as i32;
+    let ly = (idx / CHUNK_SIZE) as i32;
+    let wx = chunk.coord.cx * CHUNK_SIZE as i32 + lx;
+    let wy = chunk.coord.cy * CHUNK_SIZE as i32 + ly;
+    let wz = chunk.coord.cz;
+
+    let mut gr = 0.0f32;
+    let mut gg = 0.0f32;
+    let mut gb = 0.0f32;
+
+    for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+        for dist in 1i32..=3 {
+            let nx = wx + dx * dist;
+            let ny = wy + dy * dist;
+            let ncx = nx.div_euclid(CHUNK_SIZE as i32);
+            let ncy = ny.div_euclid(CHUNK_SIZE as i32);
+            let nlx = nx.rem_euclid(CHUNK_SIZE as i32) as usize;
+            let nly = ny.rem_euclid(CHUNK_SIZE as i32) as usize;
+            let nidx = nly * CHUNK_SIZE + nlx;
+            let ncoord = ChunkCoord {
+                cx: ncx,
+                cy: ncy,
+                cz: wz,
+            };
+
+            if let Some(&entity) = world.chunks.get(&ncoord)
+                && let Ok(nc) = all_chunks.get(entity)
+                && nc.liquid_kind[nidx] != LIQ_NONE
+                && nc.liquid_amount_read[nidx] > 0
+                && let Some(props) = liquid_reg
+                    .as_ref()
+                    .and_then(|r| r.get(nc.liquid_kind[nidx]))
+                && props.emits_light > 0
+            {
+                let intensity = props.emits_light as f32 / 255.0 * 0.6f32.powi(dist);
+                let [lr, lg, lb, _] = props.color;
+                gr += lr as f32 * intensity;
+                gg += lg as f32 * intensity;
+                gb += lb as f32 * intensity;
+            }
+        }
+    }
+
+    [
+        gr.min(255.0) as u8,
+        gg.min(255.0) as u8,
+        gb.min(255.0) as u8,
+    ]
+}
+
+/// Final tile colour: liquid composited over background with amount-driven alpha, pressure glow,
+/// and additive light contribution from nearby emissive sources.
 fn tile_color(
     idx: usize,
     chunk: &ChunkData,
@@ -260,7 +328,7 @@ fn tile_color(
         let pressure_boost = 1.0 + chunk.pressure_read[idx] as f32 / 255.0 * 0.4;
 
         if props.emits_light > 0 {
-            // Emissive liquids stay fully opaque; apply both boosts.
+            // Emissive source: fully opaque, IS the light — no glow added to self.
             let boost = (1.0 + props.emits_light as f32 / 255.0) * pressure_boost;
             return Color::srgba_u8(
                 (lr as f32 * boost).min(255.0) as u8,
@@ -270,7 +338,7 @@ fn tile_color(
             );
         }
 
-        // Amount-driven alpha: shallow = semi-transparent, reveals background.
+        // Non-emissive liquid: amount-alpha composite over background, then receive glow.
         let alpha = (amount as f32 / 255.0 * 0.75 + 0.25).min(1.0);
         let lr = (lr as f32 * pressure_boost).min(255.0);
         let lg = (lg as f32 * pressure_boost).min(255.0);
@@ -278,14 +346,23 @@ fn tile_color(
         let [bg_r, bg_g, bg_b, _] =
             background_rgba(idx, chunk, material_reg, liquid_reg, world, all_chunks);
         let inv = 1.0 - alpha;
+        let [gr, gg, gb] = compute_light_glow(idx, chunk, world, all_chunks, liquid_reg);
         return Color::srgba_u8(
-            (lr * alpha + bg_r as f32 * inv).min(255.0) as u8,
-            (lg * alpha + bg_g as f32 * inv).min(255.0) as u8,
-            (lb * alpha + bg_b as f32 * inv).min(255.0) as u8,
+            (lr * alpha + bg_r as f32 * inv + gr as f32).min(255.0) as u8,
+            (lg * alpha + bg_g as f32 * inv + gg as f32).min(255.0) as u8,
+            (lb * alpha + bg_b as f32 * inv + gb as f32).min(255.0) as u8,
             255,
         );
     }
 
-    let [r, g, b, a] = background_rgba(idx, chunk, material_reg, liquid_reg, world, all_chunks);
+    // No liquid: background (terrain or depth peek). Add glow for air tiles.
+    let [mut r, mut g, mut b, a] =
+        background_rgba(idx, chunk, material_reg, liquid_reg, world, all_chunks);
+    if chunk.terrain[idx] == MAT_AIR {
+        let [gr, gg, gb] = compute_light_glow(idx, chunk, world, all_chunks, liquid_reg);
+        r = (r as u16 + gr as u16).min(255) as u8;
+        g = (g as u16 + gg as u16).min(255) as u8;
+        b = (b as u16 + gb as u16).min(255) as u8;
+    }
     Color::srgba_u8(r, g, b, a)
 }
