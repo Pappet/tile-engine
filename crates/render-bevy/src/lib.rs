@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use sim_fluid::LiquidRegistry;
 use tile_core::chunk::ChunkData;
-use tile_core::coords::{CHUNK_SIZE, ChunkCoord};
+use tile_core::coords::{CHUNK_SIZE, ChunkCoord, WorldPos};
 use tile_core::liquid::LIQ_NONE;
 use tile_core::material::{MAT_AIR, MaterialRegistry};
 use tile_core::world::World;
@@ -24,15 +24,94 @@ pub struct ChunkVisuals {
     pub tiles: Vec<Entity>,
 }
 
+/// The tile currently under the mouse cursor (updated every frame). `None` when cursor is
+/// outside the window or over a position with no chunk.
+#[derive(Resource, Default)]
+pub struct HoveredTile(pub Option<WorldPos>);
+
+#[derive(Component)]
+struct HoverSprite;
+
 pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveZLayer>();
-        app.add_systems(Startup, camera::setup_camera);
+        app.init_resource::<HoveredTile>();
+        app.add_systems(Startup, (camera::setup_camera, spawn_hover_sprite));
         app.add_systems(Update, camera::camera_control_system);
         app.add_systems(Update, handle_z_layer_change);
+        app.add_systems(
+            Update,
+            hover_tile_system.after(camera::camera_control_system),
+        );
         app.add_systems(Update, render_chunks_system.after(handle_z_layer_change));
+    }
+}
+
+fn spawn_hover_sprite(mut commands: Commands) {
+    commands.spawn((
+        SpriteBundle {
+            sprite: Sprite {
+                color: Color::srgba(1.0, 1.0, 1.0, 0.0), // hidden until cursor moves
+                custom_size: Some(Vec2::new(16.0, 16.0)),
+                ..default()
+            },
+            transform: Transform::from_xyz(0.0, 0.0, 2.0),
+            ..default()
+        },
+        HoverSprite,
+    ));
+}
+
+fn hover_tile_system(
+    windows: Query<&Window>,
+    cameras: Query<(&Camera, &GlobalTransform), With<camera::TileCamera>>,
+    active_z: Res<ActiveZLayer>,
+    world: Res<World>,
+    mut hovered: ResMut<HoveredTile>,
+    mut hover_sprites: Query<(&mut Transform, &mut Sprite), With<HoverSprite>>,
+) {
+    let Ok((mut transform, mut sprite)) = hover_sprites.get_single_mut() else {
+        return;
+    };
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
+    let Ok((camera, camera_transform)) = cameras.get_single() else {
+        return;
+    };
+
+    let Some(cursor_pos) = window.cursor_position() else {
+        hovered.0 = None;
+        sprite.color = Color::srgba(1.0, 1.0, 1.0, 0.0);
+        return;
+    };
+
+    if let Some(wp) = camera.viewport_to_world_2d(camera_transform, cursor_pos) {
+        // Tiles are center-anchored sprites: tile at (tx, ty) covers
+        // [tx*16-8, tx*16+8] in world space, so tile = floor((w+8)/16).
+        let tile_x = ((wp.x + 8.0) / 16.0).floor() as i32;
+        let tile_y = ((wp.y + 8.0) / 16.0).floor() as i32;
+        let world_pos = WorldPos {
+            x: tile_x,
+            y: tile_y,
+            z: active_z.0,
+        };
+        let (coord, _) = world_pos.split();
+
+        if world.chunks.contains_key(&coord) {
+            hovered.0 = Some(world_pos);
+            transform.translation.x = tile_x as f32 * 16.0;
+            transform.translation.y = tile_y as f32 * 16.0;
+            sprite.color = Color::srgba(1.0, 1.0, 1.0, 0.20);
+        } else {
+            hovered.0 = None;
+            sprite.color = Color::srgba(1.0, 1.0, 1.0, 0.0);
+        }
+    } else {
+        hovered.0 = None;
+        sprite.color = Color::srgba(1.0, 1.0, 1.0, 0.0);
     }
 }
 
