@@ -11,6 +11,7 @@ use sim_fluid::LiquidRegistry;
 use sim_reaction::resolver::PendingEffects;
 use tile_core::activity::WakeRequests;
 use tile_core::chunk::ChunkData;
+use tile_core::coords::ChunkCoord;
 use tile_core::coords::WorldPos;
 use tile_core::liquid::{LIQ_NONE, LiquidId};
 use tile_core::material::{MaterialId, MaterialRegistry};
@@ -25,6 +26,14 @@ struct ReactionHistory(VecDeque<usize>);
 #[derive(Resource, Default)]
 pub struct InspectedTile(pub Option<WorldPos>);
 
+/// Toggleable debug overlays drawn over the world.
+#[derive(Resource, Default)]
+pub struct DebugOverlays {
+    pub chunk_borders: bool,
+    pub activity: bool,
+    pub liquid_heatmap: bool,
+}
+
 pub struct DebugUiPlugin;
 
 impl Plugin for DebugUiPlugin {
@@ -34,8 +43,11 @@ impl Plugin for DebugUiPlugin {
             .add_plugins(EntityCountDiagnosticsPlugin)
             .init_resource::<ReactionHistory>()
             .init_resource::<InspectedTile>()
+            .init_resource::<DebugOverlays>()
             .add_systems(Update, update_reaction_history)
             .add_systems(Update, tile_click_system)
+            .add_systems(Update, toggle_overlays_system)
+            .add_systems(Update, draw_overlays_system)
             .add_systems(
                 Update,
                 debug_window
@@ -89,6 +101,91 @@ fn tile_click_system(
     }
 }
 
+fn toggle_overlays_system(keys: Res<ButtonInput<KeyCode>>, mut overlays: ResMut<DebugOverlays>) {
+    if keys.just_pressed(KeyCode::F1) {
+        overlays.chunk_borders = !overlays.chunk_borders;
+    }
+    if keys.just_pressed(KeyCode::F2) {
+        overlays.activity = !overlays.activity;
+    }
+    if keys.just_pressed(KeyCode::F3) {
+        overlays.liquid_heatmap = !overlays.liquid_heatmap;
+    }
+}
+
+fn draw_overlays_system(
+    overlays: Res<DebugOverlays>,
+    active_z: Res<ActiveZLayer>,
+    chunks: Query<&ChunkData>,
+    wake_requests: Option<Res<WakeRequests>>,
+    mut gizmos: Gizmos,
+) {
+    if !overlays.chunk_borders && !overlays.activity && !overlays.liquid_heatmap {
+        return;
+    }
+
+    let active_chunks: Vec<_> = chunks.iter().filter(|c| c.coord.cz == active_z.0).collect();
+
+    // Chunk borders — white outline per chunk.
+    if overlays.chunk_borders {
+        for chunk in &active_chunks {
+            draw_chunk_rect(&mut gizmos, chunk.coord, Color::srgba(1.0, 1.0, 1.0, 0.35));
+        }
+    }
+
+    // Activity overlay — blue outline for chunks with pending wake requests.
+    if overlays.activity
+        && let Some(ref wake) = wake_requests
+    {
+        for &coord in &wake.pending {
+            if coord.cz == active_z.0 {
+                draw_chunk_rect(&mut gizmos, coord, Color::srgba(0.2, 0.5, 1.0, 0.7));
+            }
+        }
+    }
+
+    // Liquid heatmap — per-tile cyan outline, alpha proportional to amount.
+    if overlays.liquid_heatmap {
+        for chunk in &active_chunks {
+            let base_x = chunk.coord.cx * tile_core::coords::CHUNK_SIZE as i32;
+            let base_y = chunk.coord.cy * tile_core::coords::CHUNK_SIZE as i32;
+            for (idx, &amount) in chunk.liquid_amount_read.iter().enumerate() {
+                if amount == 0 {
+                    continue;
+                }
+                let lx = (idx % tile_core::coords::CHUNK_SIZE) as i32;
+                let ly = (idx / tile_core::coords::CHUNK_SIZE) as i32;
+                let tx = (base_x + lx) as f32 * 16.0;
+                let ty = (base_y + ly) as f32 * 16.0;
+                let alpha = amount as f32 / 255.0 * 0.8;
+                draw_tile_rect(&mut gizmos, tx, ty, Color::srgba(0.0, 0.85, 1.0, alpha));
+            }
+        }
+    }
+}
+
+/// Draw a chunk-sized rectangle outline (512×512 world units).
+fn draw_chunk_rect(gizmos: &mut Gizmos, coord: ChunkCoord, color: Color) {
+    let x0 = coord.cx as f32 * 512.0 - 8.0;
+    let x1 = x0 + 512.0;
+    let y0 = coord.cy as f32 * 512.0 - 8.0;
+    let y1 = y0 + 512.0;
+    gizmos.line_2d(Vec2::new(x0, y0), Vec2::new(x1, y0), color);
+    gizmos.line_2d(Vec2::new(x1, y0), Vec2::new(x1, y1), color);
+    gizmos.line_2d(Vec2::new(x1, y1), Vec2::new(x0, y1), color);
+    gizmos.line_2d(Vec2::new(x0, y1), Vec2::new(x0, y0), color);
+}
+
+/// Draw a tile-sized rectangle outline (16×16 world units, center-anchored).
+fn draw_tile_rect(gizmos: &mut Gizmos, cx: f32, cy: f32, color: Color) {
+    let (x0, x1) = (cx - 8.0, cx + 8.0);
+    let (y0, y1) = (cy - 8.0, cy + 8.0);
+    gizmos.line_2d(Vec2::new(x0, y0), Vec2::new(x1, y0), color);
+    gizmos.line_2d(Vec2::new(x1, y0), Vec2::new(x1, y1), color);
+    gizmos.line_2d(Vec2::new(x1, y1), Vec2::new(x0, y1), color);
+    gizmos.line_2d(Vec2::new(x0, y1), Vec2::new(x0, y0), color);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn debug_window(
     mut contexts: EguiContexts,
@@ -102,6 +199,7 @@ fn debug_window(
     liquid_reg: Option<Res<LiquidRegistry>>,
     inspected: Res<InspectedTile>,
     material_reg: Option<Res<MaterialRegistry>>,
+    overlays: Res<DebugOverlays>,
 ) {
     let fps = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
@@ -181,6 +279,20 @@ fn debug_window(
                 };
                 ui.label(format!("Pending:     {pending_react}"));
                 ui.label(format!("Rate (60t):  {avg:.1}/tick"));
+            });
+
+            ui.collapsing("Overlays", |ui| {
+                ui.label("F1 Chunk Borders  F2 Activity  F3 Heatmap");
+                ui.label(format!(
+                    "Borders:{} Activity:{} Heatmap:{}",
+                    if overlays.chunk_borders { "ON " } else { "off" },
+                    if overlays.activity { "ON " } else { "off" },
+                    if overlays.liquid_heatmap {
+                        "ON "
+                    } else {
+                        "off"
+                    },
+                ));
             });
 
             ui.collapsing("Inspector", |ui| {
