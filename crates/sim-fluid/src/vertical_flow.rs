@@ -38,8 +38,9 @@ pub fn liquid_vertical_flow(
             ..coord
         };
         let above_has_liquid = snapshot.chunk_has_liquid(above);
+        let below_has_liquid = snapshot.chunk_has_liquid(below);
 
-        if !has_liquid && !above_has_liquid {
+        if !has_liquid && !above_has_liquid && !below_has_liquid {
             continue;
         }
 
@@ -63,6 +64,7 @@ pub fn liquid_vertical_flow(
                 // ── Check tile directly below (same x,y, chunk cz-1) ─────────
                 let nb_idx = idx; // same local position in the chunk below
 
+                let mut sent_vertically = false;
                 if snapshot.is_passable(below, nb_idx) {
                     let nb_kind = snapshot.get_kind(below, nb_idx);
                     let nb_amt = snapshot.get_amount(below, nb_idx);
@@ -73,6 +75,7 @@ pub fn liquid_vertical_flow(
                             amount_deltas[idx] -= self_amt as i16;
                             kind_change[idx] = Some(LIQ_NONE);
                             wake.pending.push(below);
+                            sent_vertically = true;
                         } else if nb_kind != self_kind {
                             // Case 2: different liquid → density swap if self is denser
                             let self_density = density(&liquid_reg, self_kind);
@@ -82,6 +85,30 @@ pub fn liquid_vertical_flow(
                                 amount_deltas[idx] = nb_amt as i16 - self_amt as i16;
                                 kind_change[idx] = Some(nb_kind);
                                 wake.pending.push(below);
+                                sent_vertically = true;
+                            }
+                        }
+                    }
+                }
+
+                // ── Case 3: Pressure-driven upward flow ──────────────────────
+                // Excess hydraulic pressure (pressure > own liquid weight) pushes
+                // liquid upward into the empty tile above — this drives U-pipe behavior.
+                // Symmetric: this chunk decrements; the chunk above increments via Case 3b.
+                if !sent_vertically && self_kind != LIQ_NONE && self_amt > 0 {
+                    let self_p = chunk.pressure_read[idx];
+                    if self_p > self_amt && snapshot.is_passable(above, nb_idx) {
+                        let above_kind = snapshot.get_kind(above, nb_idx);
+                        let above_amt = snapshot.get_amount(above, nb_idx);
+                        let above_p = snapshot.get_pressure(above, nb_idx);
+                        if above_kind == LIQ_NONE || above_amt < self_amt {
+                            let eff_above = above_amt as u32 + above_p as u32;
+                            if (self_p as u32) > eff_above + 1 {
+                                let flow = upward_flow(self_amt, self_p, above_amt, above_p);
+                                if flow > 0 {
+                                    amount_deltas[idx] -= flow;
+                                    wake.pending.push(above);
+                                }
                             }
                         }
                     }
@@ -105,6 +132,32 @@ pub fn liquid_vertical_flow(
                                 // Above is denser, we (lighter) should rise → we become above's liquid
                                 amount_deltas[idx] = above_amt as i16 - self_amt as i16;
                                 kind_change[idx] = Some(above_kind);
+                            }
+                        }
+                    }
+                }
+
+                // ── Case 3b: Receive liquid pushed up from below ──────────────
+                // Symmetric with Case 3 on the chunk below. Both chunks must compute
+                // the same `flow` from snapshot values to conserve mass.
+                if snapshot.is_passable(below, nb_idx) {
+                    let below_kind = snapshot.get_kind(below, nb_idx);
+                    let below_amt = snapshot.get_amount(below, nb_idx);
+                    let below_p = snapshot.get_pressure(below, nb_idx);
+                    if below_kind != LIQ_NONE
+                        && below_amt > 0
+                        && below_p > below_amt
+                        && (self_kind == LIQ_NONE || self_amt < below_amt)
+                    {
+                        let self_p = chunk.pressure_read[idx];
+                        let eff_self = self_amt as u32 + self_p as u32;
+                        if (below_p as u32) > eff_self + 1 {
+                            let flow = upward_flow(below_amt, below_p, self_amt, self_p);
+                            if flow > 0 {
+                                amount_deltas[idx] += flow;
+                                if kind_change[idx].is_none() {
+                                    kind_change[idx] = Some(below_kind);
+                                }
                             }
                         }
                     }
@@ -135,6 +188,25 @@ fn density(reg: &Option<Res<LiquidRegistry>>, id: LiquidId) -> f32 {
     reg.as_ref()
         .and_then(|r| r.get(id))
         .map_or(1.0, |p| p.density)
+}
+
+/// Amount to flow upward when `here` has excess hydraulic pressure (pressure > own amount).
+/// Mirrors `flow_with_pressure` structure; guards gravity so static water doesn't float up.
+#[inline]
+fn upward_flow(here_amt: u8, here_p: u8, above_amt: u8, above_p: u8) -> i16 {
+    debug_assert!(here_p > here_amt, "caller must ensure excess pressure");
+    let eff_above = above_amt as u32 + above_p as u32;
+    if (here_p as u32) <= eff_above + 1 {
+        return 0;
+    }
+    let raw = if here_amt > above_amt {
+        (here_amt as i16 - above_amt as i16) / 4
+    } else if here_amt >= 4 {
+        1
+    } else {
+        0
+    };
+    raw.max(0)
 }
 
 #[cfg(test)]
@@ -302,5 +374,54 @@ mod tests {
         assert_eq!(b.liquid_kind[idx], LiquidId(1), "water stays below");
         assert_eq!(a.liquid_amount_read[idx], 50);
         assert_eq!(b.liquid_amount_read[idx], 50);
+    }
+
+    /// Direct test: excess hydraulic pressure (pressure_read > amount) must push liquid
+    /// upward across a chunk boundary. No pressure recomputation — pressure is set manually
+    /// to simulate the state reached after horizontal pipe equalization in a real U-pipe.
+    #[test]
+    fn test_upward_pressure_flow_direct() {
+        let mut app = App::new();
+        app.init_resource::<LiquidSnapshot>();
+        app.init_resource::<WakeRequests>();
+        // Run vertical flow only (no pressure propagation) — pressure set manually.
+        app.add_systems(
+            Update,
+            (
+                snapshot_liquid,
+                crate::fluid_ca::init_fluid_write_buffers,
+                liquid_vertical_flow,
+                crate::fluid_ca::swap_buffers_system,
+            )
+                .chain(),
+        );
+
+        let idx = 16 * CHUNK_SIZE + 16;
+
+        // cz=0: water(50) with excess hydraulic pressure(200) — simulates pipe bottom.
+        let mut c0 = ChunkData::new_filled(ChunkCoord { cx: 0, cy: 0, cz: 0 }, MAT_AIR);
+        c0.liquid_kind[idx] = LiquidId(1);
+        c0.liquid_amount_read[idx] = 50;
+        c0.pressure_read[idx] = 200; // excess: 200 > 50
+
+        // cz=1: empty air above.
+        let c1 = ChunkData::new_filled(ChunkCoord { cx: 0, cy: 0, cz: 1 }, MAT_AIR);
+
+        let initial = 50u32;
+        let e0 = app.world_mut().spawn(c0).id();
+        let e1 = app.world_mut().spawn(c1).id();
+
+        app.update(); // 1 tick
+
+        let chunk0 = app.world().get::<ChunkData>(e0).unwrap();
+        let chunk1 = app.world().get::<ChunkData>(e1).unwrap();
+
+        let final_total =
+            chunk0.liquid_amount_read[idx] as u32 + chunk1.liquid_amount_read[idx] as u32;
+        assert_eq!(initial, final_total, "mass conserved in upward pressure flow");
+        assert!(
+            chunk1.liquid_amount_read[idx] > 0,
+            "excess hydraulic pressure must push liquid upward to cz=1"
+        );
     }
 }

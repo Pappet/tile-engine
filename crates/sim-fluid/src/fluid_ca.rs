@@ -154,6 +154,17 @@ pub fn pressure_propagation(mut chunks: Query<&mut ChunkData>, snapshot: Res<Liq
                 }
             }
 
+            // Propagate upward from below chunk: enables pressure-driven upward vertical flow
+            // (U-pipe hydraulics). A tile at z+1 inherits pressure from z if it has liquid.
+            let below_coord = ChunkCoord {
+                cz: coord.cz - 1,
+                ..coord
+            };
+            if snapshot.is_passable(below_coord, i) {
+                let nb_p = snapshot.get_pressure(below_coord, i) as u16;
+                p = p.max(nb_p.saturating_sub(1));
+            }
+
             chunk.pressure_write[i] = p.min(255) as u8;
         }
     }
