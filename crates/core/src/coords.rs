@@ -91,13 +91,74 @@ mod tests {
     }
 
     #[test]
-    fn test_negative_coordinates() {
+    fn test_split_edge_cases() {
+        // Exactly zero
+        let pos = WorldPos { x: 0, y: 0, z: 0 };
+        let (cc, lp) = pos.split();
+        assert_eq!(cc.cx, 0);
+        assert_eq!(cc.cy, 0);
+        assert_eq!(lp.lx, 0);
+        assert_eq!(lp.ly, 0);
+
+        // Just below zero
         let pos = WorldPos { x: -1, y: -1, z: 0 };
         let (cc, lp) = pos.split();
         assert_eq!(cc.cx, -1);
         assert_eq!(cc.cy, -1);
-        assert_eq!(cc.cz, 0);
         assert_eq!(lp.lx, 31);
         assert_eq!(lp.ly, 31);
+
+        // Just below chunk size
+        let pos = WorldPos { x: 31, y: 31, z: 0 };
+        let (cc, lp) = pos.split();
+        assert_eq!(cc.cx, 0);
+        assert_eq!(cc.cy, 0);
+        assert_eq!(lp.lx, 31);
+        assert_eq!(lp.ly, 31);
+
+        // Exactly chunk size
+        let pos = WorldPos { x: 32, y: 32, z: 0 };
+        let (cc, lp) = pos.split();
+        assert_eq!(cc.cx, 1);
+        assert_eq!(cc.cy, 1);
+        assert_eq!(lp.lx, 0);
+        assert_eq!(lp.ly, 0);
+
+        // Exactly negative chunk size
+        let pos = WorldPos { x: -32, y: -32, z: 0 };
+        let (cc, lp) = pos.split();
+        assert_eq!(cc.cx, -1);
+        assert_eq!(cc.cy, -1);
+        assert_eq!(lp.lx, 0);
+        assert_eq!(lp.ly, 0);
+
+        // Just below negative chunk size
+        let pos = WorldPos { x: -33, y: -33, z: 0 };
+        let (cc, lp) = pos.split();
+        assert_eq!(cc.cx, -2);
+        assert_eq!(cc.cy, -2);
+        assert_eq!(lp.lx, 31);
+        assert_eq!(lp.ly, 31);
+    }
+
+    #[test]
+    fn test_split_extreme_values() {
+        // Max values
+        let pos = WorldPos { x: i32::MAX, y: i32::MAX, z: i32::MAX };
+        let (cc, lp) = pos.split();
+        assert_eq!(cc.cx, i32::MAX >> CHUNK_SHIFT);
+        assert_eq!(cc.cy, i32::MAX >> CHUNK_SHIFT);
+        assert_eq!(cc.cz, i32::MAX);
+        assert_eq!(lp.lx, (i32::MAX & CHUNK_MASK) as u8);
+        assert_eq!(lp.ly, (i32::MAX & CHUNK_MASK) as u8);
+
+        // Min values
+        let pos = WorldPos { x: i32::MIN, y: i32::MIN, z: i32::MIN };
+        let (cc, lp) = pos.split();
+        assert_eq!(cc.cx, i32::MIN >> CHUNK_SHIFT);
+        assert_eq!(cc.cy, i32::MIN >> CHUNK_SHIFT);
+        assert_eq!(cc.cz, i32::MIN);
+        assert_eq!(lp.lx, (i32::MIN & CHUNK_MASK) as u8);
+        assert_eq!(lp.ly, (i32::MIN & CHUNK_MASK) as u8);
     }
 }
