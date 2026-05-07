@@ -155,7 +155,8 @@ fn render_chunks_system(
     }
 }
 
-/// Flat RGBA for a tile. Returns `None` if the tile is air with no liquid (fully transparent).
+/// Flat RGBA for a tile ignoring the active-layer liquid compositing.
+/// Used for depth-peek lookups on sub-layers. Returns `None` for air + no liquid.
 fn flat_tile_rgba(
     idx: usize,
     chunk: &ChunkData,
@@ -169,11 +170,11 @@ fn flat_tile_rgba(
     {
         let [r, g, b, a] = props.color;
         if props.emits_light > 0 {
-            let boost = 1.0 + (props.emits_light as f32 / 255.0);
+            let boost = 1.0 + props.emits_light as f32 / 255.0;
             return Some([
-                (r as f32 / 255.0 * boost * 255.0).min(255.0) as u8,
-                (g as f32 / 255.0 * boost * 255.0).min(255.0) as u8,
-                (b as f32 / 255.0 * boost * 255.0).min(255.0) as u8,
+                (r as f32 * boost).min(255.0) as u8,
+                (g as f32 * boost).min(255.0) as u8,
+                (b as f32 * boost).min(255.0) as u8,
                 a,
             ]);
         }
@@ -199,20 +200,24 @@ fn apply_depth_tint([r, g, b, a]: [u8; 4], dim: f32, levels: u32) -> [u8; 4] {
     [r, g, b, a]
 }
 
-/// Tile colour with depth peeking: AIR tiles show the tile 1–2 layers below, darkened.
-fn tile_color(
+/// Background RGBA: solid terrain colour, or depth-peeked Z-1/Z-2 content for AIR tiles.
+/// Does not include the current tile's liquid.
+fn background_rgba(
     idx: usize,
     chunk: &ChunkData,
     material_reg: &MaterialRegistry,
     liquid_reg: &Option<Res<LiquidRegistry>>,
     world: &World,
     all_chunks: &Query<&ChunkData>,
-) -> Color {
-    if let Some([r, g, b, a]) = flat_tile_rgba(idx, chunk, material_reg, liquid_reg) {
-        return Color::srgba_u8(r, g, b, a);
+) -> [u8; 4] {
+    let mat = chunk.terrain[idx];
+    if mat != MAT_AIR {
+        if let Some(m) = material_reg.get(mat) {
+            return m.display_color;
+        }
+        return [255, 0, 255, 255];
     }
 
-    // AIR with no liquid: peek at Z-1, then Z-2.
     for depth_level in 1u32..=2 {
         let below = ChunkCoord {
             cx: chunk.coord.cx,
@@ -228,10 +233,59 @@ fn tile_color(
             } else {
                 DEPTH_DIM_2
             };
-            let [r, g, b, a] = apply_depth_tint(rgba, dim, depth_level);
-            return Color::srgba_u8(r, g, b, a);
+            return apply_depth_tint(rgba, dim, depth_level);
         }
     }
 
-    Color::srgba_u8(0, 0, 0, 0)
+    [0, 0, 0, 0]
+}
+
+/// Final tile colour: liquid composited over background with amount-driven alpha and pressure glow.
+fn tile_color(
+    idx: usize,
+    chunk: &ChunkData,
+    material_reg: &MaterialRegistry,
+    liquid_reg: &Option<Res<LiquidRegistry>>,
+    world: &World,
+    all_chunks: &Query<&ChunkData>,
+) -> Color {
+    let liq = chunk.liquid_kind[idx];
+    let amount = chunk.liquid_amount_read[idx];
+
+    if liq != LIQ_NONE
+        && amount > 0
+        && let Some(props) = liquid_reg.as_ref().and_then(|r| r.get(liq))
+    {
+        let [lr, lg, lb, _] = props.color;
+        let pressure_boost = 1.0 + chunk.pressure_read[idx] as f32 / 255.0 * 0.4;
+
+        if props.emits_light > 0 {
+            // Emissive liquids stay fully opaque; apply both boosts.
+            let boost = (1.0 + props.emits_light as f32 / 255.0) * pressure_boost;
+            return Color::srgba_u8(
+                (lr as f32 * boost).min(255.0) as u8,
+                (lg as f32 * boost).min(255.0) as u8,
+                (lb as f32 * boost).min(255.0) as u8,
+                255,
+            );
+        }
+
+        // Amount-driven alpha: shallow = semi-transparent, reveals background.
+        let alpha = (amount as f32 / 255.0 * 0.75 + 0.25).min(1.0);
+        let lr = (lr as f32 * pressure_boost).min(255.0);
+        let lg = (lg as f32 * pressure_boost).min(255.0);
+        let lb = (lb as f32 * pressure_boost).min(255.0);
+        let [bg_r, bg_g, bg_b, _] =
+            background_rgba(idx, chunk, material_reg, liquid_reg, world, all_chunks);
+        let inv = 1.0 - alpha;
+        return Color::srgba_u8(
+            (lr * alpha + bg_r as f32 * inv).min(255.0) as u8,
+            (lg * alpha + bg_g as f32 * inv).min(255.0) as u8,
+            (lb * alpha + bg_b as f32 * inv).min(255.0) as u8,
+            255,
+        );
+    }
+
+    let [r, g, b, a] = background_rgba(idx, chunk, material_reg, liquid_reg, world, all_chunks);
+    Color::srgba_u8(r, g, b, a)
 }
