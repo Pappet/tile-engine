@@ -152,7 +152,9 @@ pub fn builtin_liquids() -> Vec<(LiquidId, LiquidProperties)> {
                 boils_to: GasId(0),
                 damages_living: 10,
                 corrosion: 0,
-                ignites_flammable: true, // actually it IS flammable, so doesn't instantly ignite others unless burning, but for struct properties it fits
+                // actually it IS flammable, so doesn't instantly ignite others unless burning,
+                // but for struct properties it fits
+                ignites_flammable: true,
                 color: [50, 50, 50, 255],
                 emits_light: 0,
                 flags: LiquidFlags::STAINS,
