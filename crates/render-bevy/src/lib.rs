@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use bevy::prelude::*;
 use sim_fluid::LiquidRegistry;
 use tile_core::chunk::ChunkData;
@@ -193,7 +191,7 @@ fn render_chunks_system(
     // 2. Collect which active-z entities need a visual refresh.
     //    - A chunk at active_z changed directly.
     //    - A chunk at active_z - 1 or - 2 changed (depth-peek content changed).
-    let mut needs_update: HashSet<Entity> = HashSet::new();
+    let mut neighbor_coords = Vec::new();
 
     for chunk in changed_any.iter() {
         let depth = active_z.0 - chunk.coord.cz;
@@ -216,11 +214,23 @@ fn render_chunks_system(
                 cy: target_coord.cy + dcy,
                 cz: target_coord.cz,
             };
-            if let Some(&entity) = world.chunks.get(&neighbor) {
-                needs_update.insert(entity);
-            }
+            neighbor_coords.push(neighbor);
         }
     }
+
+    neighbor_coords.sort_unstable_by_key(|c| (c.cx, c.cy, c.cz));
+    neighbor_coords.dedup();
+
+    let mut needs_update: Vec<Entity> = Vec::new();
+
+    for neighbor in neighbor_coords {
+        if let Some(&entity) = world.chunks.get(&neighbor) {
+            needs_update.push(entity);
+        }
+    }
+
+    needs_update.sort_unstable();
+    needs_update.dedup();
 
     // 3. Redraw all flagged chunks.
     for entity in needs_update {
