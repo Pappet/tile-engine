@@ -156,18 +156,12 @@ fn render_chunks_system(
         let offset_x = (chunk.coord.cx * CHUNK_SIZE as i32) as f32 * 16.0;
         let offset_y = (chunk.coord.cy * CHUNK_SIZE as i32) as f32 * 16.0;
         let mut tiles = Vec::with_capacity(CHUNK_SIZE * CHUNK_SIZE);
+        let neighbors = ChunkNeighborhood::new(chunk, &world, &all_chunk_data);
 
         for ly in 0..CHUNK_SIZE {
             for lx in 0..CHUNK_SIZE {
                 let idx = ly * CHUNK_SIZE + lx;
-                let color = tile_color(
-                    idx,
-                    chunk,
-                    &material_reg,
-                    &liquid_reg,
-                    &world,
-                    &all_chunk_data,
-                );
+                let color = tile_color(idx, &neighbors, &material_reg, &liquid_reg);
                 let x = offset_x + (lx as f32) * 16.0;
                 let y = offset_y + (ly as f32) * 16.0;
 
@@ -227,17 +221,66 @@ fn render_chunks_system(
         let Ok((chunk, visuals)) = all_with_visuals.get(entity) else {
             continue;
         };
+        let neighbors = ChunkNeighborhood::new(chunk, &world, &all_chunk_data);
         for (idx, &tile_entity) in visuals.tiles.iter().enumerate() {
             if let Ok(mut sprite) = sprites.get_mut(tile_entity) {
-                sprite.color = tile_color(
-                    idx,
-                    chunk,
-                    &material_reg,
-                    &liquid_reg,
-                    &world,
-                    &all_chunk_data,
-                );
+                sprite.color = tile_color(idx, &neighbors, &material_reg, &liquid_reg);
             }
+        }
+    }
+}
+
+struct ChunkNeighborhood<'a> {
+    center: &'a ChunkData,
+    north: Option<&'a ChunkData>,
+    south: Option<&'a ChunkData>,
+    east: Option<&'a ChunkData>,
+    west: Option<&'a ChunkData>,
+    below1: Option<&'a ChunkData>,
+    below2: Option<&'a ChunkData>,
+}
+
+impl<'a> ChunkNeighborhood<'a> {
+    fn new(center: &'a ChunkData, world: &World, all_chunks: &'a Query<&ChunkData>) -> Self {
+        let fetch = |dx: i32, dy: i32, dz: i32| {
+            let coord = ChunkCoord {
+                cx: center.coord.cx + dx,
+                cy: center.coord.cy + dy,
+                cz: center.coord.cz + dz,
+            };
+            world
+                .chunks
+                .get(&coord)
+                .and_then(|&e| all_chunks.get(e).ok())
+        };
+
+        Self {
+            center,
+            north: fetch(0, 1, 0),
+            south: fetch(0, -1, 0),
+            east: fetch(1, 0, 0),
+            west: fetch(-1, 0, 0),
+            below1: fetch(0, 0, -1),
+            below2: fetch(0, 0, -2),
+        }
+    }
+
+    fn get_chunk(&self, coord: ChunkCoord) -> Option<&'a ChunkData> {
+        if coord == self.center.coord {
+            return Some(self.center);
+        }
+        let dx = coord.cx - self.center.coord.cx;
+        let dy = coord.cy - self.center.coord.cy;
+        let dz = coord.cz - self.center.coord.cz;
+
+        match (dx, dy, dz) {
+            (0, 1, 0) => self.north,
+            (0, -1, 0) => self.south,
+            (1, 0, 0) => self.east,
+            (-1, 0, 0) => self.west,
+            (0, 0, -1) => self.below1,
+            (0, 0, -2) => self.below2,
+            _ => None,
         }
     }
 }
@@ -291,13 +334,11 @@ fn apply_depth_tint([r, g, b, a]: [u8; 4], dim: f32, levels: u32) -> [u8; 4] {
 /// Does not include the current tile's liquid.
 fn background_rgba(
     idx: usize,
-    chunk: &ChunkData,
+    neighbors: &ChunkNeighborhood,
     material_reg: &MaterialRegistry,
     liquid_reg: &Option<Res<LiquidRegistry>>,
-    world: &World,
-    all_chunks: &Query<&ChunkData>,
 ) -> [u8; 4] {
-    let mat = chunk.terrain[idx];
+    let mat = neighbors.center.terrain[idx];
     if mat != MAT_AIR {
         if let Some(m) = material_reg.get(mat) {
             return m.display_color;
@@ -307,12 +348,11 @@ fn background_rgba(
 
     for depth_level in 1u32..=2 {
         let below = ChunkCoord {
-            cx: chunk.coord.cx,
-            cy: chunk.coord.cy,
-            cz: chunk.coord.cz - depth_level as i32,
+            cx: neighbors.center.coord.cx,
+            cy: neighbors.center.coord.cy,
+            cz: neighbors.center.coord.cz - depth_level as i32,
         };
-        if let Some(&entity) = world.chunks.get(&below)
-            && let Ok(below_chunk) = all_chunks.get(entity)
+        if let Some(below_chunk) = neighbors.get_chunk(below)
             && let Some(rgba) = flat_tile_rgba(idx, below_chunk, material_reg, liquid_reg)
         {
             let dim = if depth_level == 1 {
@@ -331,16 +371,14 @@ fn background_rgba(
 /// Returns `[r, g, b]` glow to add to the tile colour. Only called for AIR-terrain tiles.
 fn compute_light_glow(
     idx: usize,
-    chunk: &ChunkData,
-    world: &World,
-    all_chunks: &Query<&ChunkData>,
+    neighbors: &ChunkNeighborhood,
     liquid_reg: &Option<Res<LiquidRegistry>>,
 ) -> [u8; 3] {
     let lx = (idx % CHUNK_SIZE) as i32;
     let ly = (idx / CHUNK_SIZE) as i32;
-    let wx = chunk.coord.cx * CHUNK_SIZE as i32 + lx;
-    let wy = chunk.coord.cy * CHUNK_SIZE as i32 + ly;
-    let wz = chunk.coord.cz;
+    let wx = neighbors.center.coord.cx * CHUNK_SIZE as i32 + lx;
+    let wy = neighbors.center.coord.cy * CHUNK_SIZE as i32 + ly;
+    let wz = neighbors.center.coord.cz;
 
     let mut gr = 0.0f32;
     let mut gg = 0.0f32;
@@ -361,8 +399,7 @@ fn compute_light_glow(
                 cz: wz,
             };
 
-            if let Some(&entity) = world.chunks.get(&ncoord)
-                && let Ok(nc) = all_chunks.get(entity)
+            if let Some(nc) = neighbors.get_chunk(ncoord)
                 && nc.liquid_kind[nidx] != LIQ_NONE
                 && nc.liquid_amount_read[nidx] > 0
                 && let Some(props) = liquid_reg
@@ -390,21 +427,19 @@ fn compute_light_glow(
 /// and additive light contribution from nearby emissive sources.
 fn tile_color(
     idx: usize,
-    chunk: &ChunkData,
+    neighbors: &ChunkNeighborhood,
     material_reg: &MaterialRegistry,
     liquid_reg: &Option<Res<LiquidRegistry>>,
-    world: &World,
-    all_chunks: &Query<&ChunkData>,
 ) -> Color {
-    let liq = chunk.liquid_kind[idx];
-    let amount = chunk.liquid_amount_read[idx];
+    let liq = neighbors.center.liquid_kind[idx];
+    let amount = neighbors.center.liquid_amount_read[idx];
 
     if liq != LIQ_NONE
         && amount > 0
         && let Some(props) = liquid_reg.as_ref().and_then(|r| r.get(liq))
     {
         let [lr, lg, lb, _] = props.color;
-        let pressure_boost = 1.0 + chunk.pressure_read[idx] as f32 / 255.0 * 0.4;
+        let pressure_boost = 1.0 + neighbors.center.pressure_read[idx] as f32 / 255.0 * 0.4;
 
         if props.emits_light > 0 {
             // Emissive source: fully opaque, IS the light — no glow added to self.
@@ -422,10 +457,9 @@ fn tile_color(
         let lr = (lr as f32 * pressure_boost).min(255.0);
         let lg = (lg as f32 * pressure_boost).min(255.0);
         let lb = (lb as f32 * pressure_boost).min(255.0);
-        let [bg_r, bg_g, bg_b, _] =
-            background_rgba(idx, chunk, material_reg, liquid_reg, world, all_chunks);
+        let [bg_r, bg_g, bg_b, _] = background_rgba(idx, neighbors, material_reg, liquid_reg);
         let inv = 1.0 - alpha;
-        let [gr, gg, gb] = compute_light_glow(idx, chunk, world, all_chunks, liquid_reg);
+        let [gr, gg, gb] = compute_light_glow(idx, neighbors, liquid_reg);
         return Color::srgba_u8(
             (lr * alpha + bg_r as f32 * inv + gr as f32).min(255.0) as u8,
             (lg * alpha + bg_g as f32 * inv + gg as f32).min(255.0) as u8,
@@ -435,10 +469,9 @@ fn tile_color(
     }
 
     // No liquid: background (terrain or depth peek). Add glow for air tiles.
-    let [mut r, mut g, mut b, a] =
-        background_rgba(idx, chunk, material_reg, liquid_reg, world, all_chunks);
-    if chunk.terrain[idx] == MAT_AIR {
-        let [gr, gg, gb] = compute_light_glow(idx, chunk, world, all_chunks, liquid_reg);
+    let [mut r, mut g, mut b, a] = background_rgba(idx, neighbors, material_reg, liquid_reg);
+    if neighbors.center.terrain[idx] == MAT_AIR {
+        let [gr, gg, gb] = compute_light_glow(idx, neighbors, liquid_reg);
         r = (r as u16 + gr as u16).min(255) as u8;
         g = (g as u16 + gg as u16).min(255) as u8;
         b = (b as u16 + gb as u16).min(255) as u8;
