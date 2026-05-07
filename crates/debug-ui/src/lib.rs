@@ -77,8 +77,8 @@ fn tile_click_system(
         return;
     };
     if let Some(world_pos) = camera.viewport_to_world_2d(camera_transform, cursor_pos) {
-        let tile_x = (world_pos.x / 16.0).floor() as i32;
-        let tile_y = (world_pos.y / 16.0).floor() as i32;
+        let tile_x = ((world_pos.x + 8.0) / 16.0).floor() as i32;
+        let tile_y = ((world_pos.y + 8.0) / 16.0).floor() as i32;
         inspected.0 = Some(WorldPos {
             x: tile_x,
             y: tile_y,
