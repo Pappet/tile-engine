@@ -98,10 +98,6 @@ mod box_array_liquid {
     }
 }
 
-fn default_true() -> bool {
-    true
-}
-
 // ── ChunkData ───────────────────────────────────────────────────────────────
 
 /// The data for a single chunk of tiles (32×32 = 1024 tiles).
@@ -150,13 +146,6 @@ pub struct ChunkData {
     /// The tick this chunk was last marked active.
     #[serde(skip)]
     pub last_active_tick: u64,
-
-    #[serde(skip, default = "default_true")]
-    pub needs_liquid_recount: bool,
-    #[serde(skip)]
-    pub liquid_count: u16,
-    #[serde(skip)]
-    pub liquid_count_write: u16,
 }
 
 impl ChunkData {
@@ -180,9 +169,6 @@ impl ChunkData {
             dirty: false,
             active: crate::activity::SystemMask::empty(),
             last_active_tick: 0,
-            needs_liquid_recount: true,
-            liquid_count: 0,
-            liquid_count_write: 0,
         }
     }
 
@@ -193,7 +179,6 @@ impl ChunkData {
         std::mem::swap(&mut self.liquid_amount_read, &mut self.liquid_amount_write);
         std::mem::swap(&mut self.liquid_temp_read, &mut self.liquid_temp_write);
         std::mem::swap(&mut self.pressure_read, &mut self.pressure_write);
-        std::mem::swap(&mut self.liquid_count, &mut self.liquid_count_write);
     }
 }
 
@@ -213,7 +198,7 @@ mod tests {
         //   liquid_temp   (×2):  1024 × 2  = 4096
         //   pressure      (×2):  1024 × 1  = 2048
         //   Total                          ≈ 14 KB  (< 20 KB ✔)
-        assert!(size_of::<ChunkData>() <= 136);
+        assert!(size_of::<ChunkData>() <= 128);
         assert_eq!(size_of::<[MaterialId; CHUNK_AREA]>(), 2048);
     }
 

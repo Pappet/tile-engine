@@ -26,8 +26,6 @@ pub fn liquid_vertical_flow(
 ) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
-        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
-
         // Check if chunk above has liquid that could fall into us
         let above = ChunkCoord {
             cz: coord.cz + 1,
@@ -39,7 +37,7 @@ pub fn liquid_vertical_flow(
         };
         let above_has_liquid = snapshot.chunk_has_liquid(above);
 
-        if !has_liquid && !above_has_liquid {
+        if chunk.liquid_count == 0 && !above_has_liquid {
             continue;
         }
 
@@ -118,8 +116,15 @@ pub fn liquid_vertical_flow(
         // only override kinds where vertical flow actually changed them.
         for (i, &d) in amount_deltas.iter().enumerate() {
             if d != 0 {
-                let v = (chunk.liquid_amount_write[i] as i16) + d;
-                chunk.liquid_amount_write[i] = v.clamp(0, 255) as u8;
+                let old_v = chunk.liquid_amount_write[i];
+                let v = (old_v as i16) + d;
+                let new_v = v.clamp(0, 255) as u8;
+                if old_v == 0 && new_v > 0 {
+                    chunk.liquid_count_write = chunk.liquid_count_write.saturating_add(1);
+                } else if old_v > 0 && new_v == 0 {
+                    chunk.liquid_count_write = chunk.liquid_count_write.saturating_sub(1);
+                }
+                chunk.liquid_amount_write[i] = new_v;
             }
         }
         for (i, change) in kind_change.iter().enumerate() {

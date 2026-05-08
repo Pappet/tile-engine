@@ -71,6 +71,11 @@ pub fn run_sources_drains(
             continue;
         }
         let new_val = (current as u16 + source.rate as u16).min(255) as u8;
+        if current == 0 && new_val > 0 {
+            chunk.liquid_count = chunk.liquid_count.saturating_add(1);
+        } else if current > 0 && new_val == 0 {
+            chunk.liquid_count = chunk.liquid_count.saturating_sub(1);
+        }
         chunk.liquid_amount_read[idx] = new_val;
         if chunk.liquid_kind[idx] == LIQ_NONE {
             chunk.liquid_kind[idx] = source.kind;
@@ -99,6 +104,11 @@ pub fn run_sources_drains(
         }
         let current = chunk.liquid_amount_read[idx];
         let new_val = current.saturating_sub(drain.rate);
+        if current == 0 && new_val > 0 {
+            chunk.liquid_count = chunk.liquid_count.saturating_add(1);
+        } else if current > 0 && new_val == 0 {
+            chunk.liquid_count = chunk.liquid_count.saturating_sub(1);
+        }
         chunk.liquid_amount_read[idx] = new_val;
         if new_val == 0 {
             chunk.liquid_kind[idx] = LIQ_NONE;

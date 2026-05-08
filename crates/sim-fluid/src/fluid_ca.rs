@@ -63,8 +63,7 @@ pub fn flow_with_pressure(
 pub fn pressure_propagation(mut chunks: Query<&mut ChunkData>, snapshot: Res<LiquidSnapshot>) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
-        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
-        if !has_liquid && !snapshot.has_any_neighbor_with_liquid(coord) {
+        if chunk.liquid_count == 0 && !snapshot.has_any_neighbor_with_liquid(coord) {
             chunk.pressure_write.fill(0);
             continue;
         }
@@ -171,8 +170,7 @@ pub fn fluid_step_local(
 ) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
-        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
-        if !has_liquid && !snapshot.has_any_neighbor(coord) {
+        if chunk.liquid_count == 0 && !snapshot.has_any_neighbor(coord) {
             continue;
         }
 
@@ -317,8 +315,15 @@ pub fn fluid_step_local(
         // ── Apply deltas onto pre-initialized write buffer ────────────────
         for (i, &d) in deltas.iter().enumerate() {
             if d != 0 {
-                let v = (chunk.liquid_amount_write[i] as i16) + d;
-                chunk.liquid_amount_write[i] = v.clamp(0, 255) as u8;
+                let old_v = chunk.liquid_amount_write[i];
+                let v = (old_v as i16) + d;
+                let new_v = v.clamp(0, 255) as u8;
+                if old_v == 0 && new_v > 0 {
+                    chunk.liquid_count_write = chunk.liquid_count_write.saturating_add(1);
+                } else if old_v > 0 && new_v == 0 {
+                    chunk.liquid_count_write = chunk.liquid_count_write.saturating_sub(1);
+                }
+                chunk.liquid_amount_write[i] = new_v;
             }
         }
 
@@ -557,10 +562,15 @@ pub fn swap_buffers_system(mut chunks: Query<&mut ChunkData>) {
 pub fn init_fluid_write_buffers(mut chunks: Query<&mut ChunkData>) {
     for mut chunk in chunks.iter_mut() {
         let chunk = &mut *chunk;
+        if chunk.needs_liquid_recount {
+            chunk.liquid_count = chunk.liquid_amount_read.iter().filter(|&&a| a > 0).count() as u16;
+            chunk.needs_liquid_recount = false;
+        }
         chunk
             .liquid_amount_write
             .copy_from_slice(&*chunk.liquid_amount_read);
         chunk.liquid_kind_write.copy_from_slice(&*chunk.liquid_kind);
+        chunk.liquid_count_write = chunk.liquid_count;
     }
 }
 
