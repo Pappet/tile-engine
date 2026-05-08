@@ -153,16 +153,21 @@ fn load_entities_system(
     existing_sources: Query<Entity, With<LiquidSource>>,
     existing_drains: Query<Entity, With<LiquidDrain>>,
 ) {
+    let mut cleared_existing = false;
+
     for req in events.read() {
         let layout = SaveLayout::new(&req.slot);
         match load_entities(&layout) {
             Err(err) => eprintln!("[app] entity load failed: {err}"),
             Ok(serialized) => {
-                for entity in existing_sources.iter() {
-                    commands.entity(entity).despawn();
-                }
-                for entity in existing_drains.iter() {
-                    commands.entity(entity).despawn();
+                if !cleared_existing {
+                    for entity in existing_sources.iter() {
+                        commands.entity(entity).despawn();
+                    }
+                    for entity in existing_drains.iter() {
+                        commands.entity(entity).despawn();
+                    }
+                    cleared_existing = true;
                 }
                 for se in &serialized {
                     if let Some(source) = se.get::<LiquidSource>() {
