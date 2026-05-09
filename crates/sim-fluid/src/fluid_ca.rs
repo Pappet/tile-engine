@@ -63,7 +63,7 @@ pub fn flow_with_pressure(
 pub fn pressure_propagation(mut chunks: Query<&mut ChunkData>, snapshot: Res<LiquidSnapshot>) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
-        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
+        let has_liquid = *chunk.liquid_amount_read != [0u8; CHUNK_AREA];
         if !has_liquid && !snapshot.has_any_neighbor_with_liquid(coord) {
             chunk.pressure_write.fill(0);
             continue;
@@ -171,7 +171,7 @@ pub fn fluid_step_local(
 ) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
-        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
+        let has_liquid = *chunk.liquid_amount_read != [0u8; CHUNK_AREA];
         if !has_liquid && !snapshot.has_any_neighbor(coord) {
             continue;
         }
@@ -800,8 +800,8 @@ mod tests {
         let chunk = app.world().get::<ChunkData>(entity).unwrap();
         assert_eq!(total_liquid(chunk), initial, "mass conserved in U-pipe");
 
-        let right_top = 0 * CHUNK_SIZE + 4;
-        let right_mid = 1 * CHUNK_SIZE + 4;
+        let right_top = 4;
+        let right_mid = CHUNK_SIZE + 4;
         let right_bot = 2 * CHUNK_SIZE + 4;
         let right_total = chunk.liquid_amount_read[right_top] as u32
             + chunk.liquid_amount_read[right_mid] as u32
@@ -811,8 +811,8 @@ mod tests {
             "right column must receive liquid via U-pipe"
         );
 
-        let left_total = chunk.liquid_amount_read[0 * CHUNK_SIZE] as u32
-            + chunk.liquid_amount_read[1 * CHUNK_SIZE] as u32
+        let left_total = chunk.liquid_amount_read[0] as u32
+            + chunk.liquid_amount_read[CHUNK_SIZE] as u32
             + chunk.liquid_amount_read[2 * CHUNK_SIZE] as u32;
 
         // Both columns have 3 tiles; tolerance ≤ 30 total (≤10 per tile).
