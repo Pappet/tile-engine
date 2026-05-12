@@ -40,7 +40,8 @@ impl LiquidSnapshot {
     pub fn chunk_has_liquid(&self, coord: ChunkCoord) -> bool {
         self.amounts
             .get(&coord)
-            .is_some_and(|a| a.iter().any(|&v| v > 0))
+            // ⚡ Bolt: Fast SIMD array comparison
+            .is_some_and(|a| **a != [0u8; CHUNK_AREA])
     }
 
     /// True if any of the 4 horizontal neighbor chunks exist in the snapshot.
