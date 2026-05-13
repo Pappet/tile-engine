@@ -43,8 +43,7 @@ pub fn liquid_vertical_flow(
             continue;
         }
 
-        let mut amounts = [0u8; CHUNK_AREA];
-        amounts.copy_from_slice(&*chunk.liquid_amount_read);
+        let amounts = &*chunk.liquid_amount_read;
         let mut amount_deltas = [0i16; CHUNK_AREA];
         // Track per-tile kind changes from vertical flow. None = unchanged.
         let mut kind_change: [Option<LiquidId>; CHUNK_AREA] = [None; CHUNK_AREA];

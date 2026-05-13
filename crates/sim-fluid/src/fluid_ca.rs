@@ -176,10 +176,8 @@ pub fn fluid_step_local(
             continue;
         }
 
-        let mut amounts = [0u8; CHUNK_AREA];
-        amounts.copy_from_slice(&*chunk.liquid_amount_read);
-        let mut pressures = [0u8; CHUNK_AREA];
-        pressures.copy_from_slice(&*chunk.pressure_read);
+        let amounts = &*chunk.liquid_amount_read;
+        let pressures = &*chunk.pressure_read;
         let mut deltas = [0i16; CHUNK_AREA];
 
         // ── Intra-chunk: right + down pairs only ─────────────────────────
