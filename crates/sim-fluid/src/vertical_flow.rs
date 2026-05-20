@@ -26,7 +26,7 @@ pub fn liquid_vertical_flow(
 ) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
-        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
+        let has_liquid = snapshot.chunk_has_liquid(coord);
 
         // Check if chunk above has liquid that could fall into us
         let above = ChunkCoord {

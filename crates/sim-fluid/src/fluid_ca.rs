@@ -63,7 +63,7 @@ pub fn flow_with_pressure(
 pub fn pressure_propagation(mut chunks: Query<&mut ChunkData>, snapshot: Res<LiquidSnapshot>) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
-        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
+        let has_liquid = snapshot.chunk_has_liquid(coord);
         if !has_liquid && !snapshot.has_any_neighbor_with_liquid(coord) {
             chunk.pressure_write.fill(0);
             continue;
@@ -171,7 +171,7 @@ pub fn fluid_step_local(
 ) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
-        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
+        let has_liquid = snapshot.chunk_has_liquid(coord);
         if !has_liquid && !snapshot.has_any_neighbor(coord) {
             continue;
         }
