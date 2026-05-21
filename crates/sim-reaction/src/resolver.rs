@@ -165,23 +165,29 @@ pub fn periodic_reaction_system(
         return;
     }
 
+    // Performance optimization: Pre-filter active reactions to avoid
+    // doing a registry lookup and tick-multiple check for every chunk
+    // shifting time complexity from O(Chunks * TotalReactions) to
+    // O(TotalReactions + Chunks * ActiveReactions).
+    let mut active_reactions = Vec::with_capacity(periodic_ids.len());
+    for rid in periodic_ids {
+        if let Some(reaction) = registry.get(*rid) {
+            if let crate::Trigger::Periodic { every_ticks } = reaction.trigger {
+                if every_ticks == 0 || tick.is_multiple_of(every_ticks as u64) {
+                    active_reactions.push((*rid, reaction));
+                }
+            }
+        }
+    }
+
+    if active_reactions.is_empty() {
+        return;
+    }
+
     // Phase 1: collect pending effects (immutable chunk reads).
     for chunk in chunks.iter() {
         let coord = chunk.coord;
-        for rid in periodic_ids {
-            let reaction = match registry.get(*rid) {
-                Some(r) => r,
-                None => continue,
-            };
-
-            // Periodic phase-offset: skip ticks where (tick % every_ticks) != 0.
-            let crate::Trigger::Periodic { every_ticks } = reaction.trigger else {
-                continue;
-            };
-            if every_ticks > 0 && !tick.is_multiple_of(every_ticks as u64) {
-                continue;
-            }
-
+        for (rid, reaction) in &active_reactions {
             for idx in 0..tile_core::coords::CHUNK_AREA {
                 if let Some(min_t) = reaction.min_temperature
                     && chunk.temp[idx] < min_t
