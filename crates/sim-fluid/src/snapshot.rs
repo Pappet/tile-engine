@@ -15,6 +15,7 @@ pub struct LiquidSnapshot {
     kinds: HashMap<ChunkCoord, Box<[LiquidId; CHUNK_AREA]>>,
     terrain: HashMap<ChunkCoord, Box<[MaterialId; CHUNK_AREA]>>,
     pressures: HashMap<ChunkCoord, Box<[u8; CHUNK_AREA]>>,
+    chunk_has_liquid_cache: HashMap<ChunkCoord, bool>,
 }
 
 impl LiquidSnapshot {
@@ -38,9 +39,10 @@ impl LiquidSnapshot {
 
     /// True if chunk exists in snapshot and has any non-zero liquid amount.
     pub fn chunk_has_liquid(&self, coord: ChunkCoord) -> bool {
-        self.amounts
+        self.chunk_has_liquid_cache
             .get(&coord)
-            .is_some_and(|a| a.iter().any(|&v| v > 0))
+            .copied()
+            .unwrap_or(false)
     }
 
     /// True if any of the 4 horizontal neighbor chunks exist in the snapshot.
@@ -115,6 +117,11 @@ pub fn snapshot_liquid(mut snapshot: ResMut<LiquidSnapshot>, chunks: Query<&Chun
     for chunk in chunks.iter() {
         seen.insert(chunk.coord);
 
+        let has_liquid = chunk.liquid_amount_read.iter().any(|&v| v > 0);
+        snapshot
+            .chunk_has_liquid_cache
+            .insert(chunk.coord, has_liquid);
+
         snapshot
             .amounts
             .entry(chunk.coord)
@@ -145,4 +152,7 @@ pub fn snapshot_liquid(mut snapshot: ResMut<LiquidSnapshot>, chunks: Query<&Chun
     snapshot.kinds.retain(|k, _| seen.contains(k));
     snapshot.terrain.retain(|k, _| seen.contains(k));
     snapshot.pressures.retain(|k, _| seen.contains(k));
+    snapshot
+        .chunk_has_liquid_cache
+        .retain(|k, _| seen.contains(k));
 }
