@@ -15,6 +15,7 @@ pub struct LiquidSnapshot {
     kinds: HashMap<ChunkCoord, Box<[LiquidId; CHUNK_AREA]>>,
     terrain: HashMap<ChunkCoord, Box<[MaterialId; CHUNK_AREA]>>,
     pressures: HashMap<ChunkCoord, Box<[u8; CHUNK_AREA]>>,
+    has_liquid: std::collections::HashSet<ChunkCoord>,
 }
 
 impl LiquidSnapshot {
@@ -38,9 +39,7 @@ impl LiquidSnapshot {
 
     /// True if chunk exists in snapshot and has any non-zero liquid amount.
     pub fn chunk_has_liquid(&self, coord: ChunkCoord) -> bool {
-        self.amounts
-            .get(&coord)
-            .is_some_and(|a| a.iter().any(|&v| v > 0))
+        self.has_liquid.contains(&coord)
     }
 
     /// True if any of the 4 horizontal neighbor chunks exist in the snapshot.
@@ -111,6 +110,7 @@ impl LiquidSnapshot {
 /// avoiding ~4 Box alloc/dealloc per chunk per tick.
 pub fn snapshot_liquid(mut snapshot: ResMut<LiquidSnapshot>, chunks: Query<&ChunkData>) {
     let mut seen = std::collections::HashSet::with_capacity(chunks.iter().len());
+    snapshot.has_liquid.clear();
 
     for chunk in chunks.iter() {
         seen.insert(chunk.coord);
@@ -138,6 +138,10 @@ pub fn snapshot_liquid(mut snapshot: ResMut<LiquidSnapshot>, chunks: Query<&Chun
             .entry(chunk.coord)
             .or_insert_with(|| Box::new([0u8; CHUNK_AREA]))
             .copy_from_slice(&*chunk.pressure_read);
+
+        if chunk.liquid_amount_read.iter().any(|&v| v > 0) {
+            snapshot.has_liquid.insert(chunk.coord);
+        }
     }
 
     // Remove entries for chunks that no longer exist.
