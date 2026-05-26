@@ -166,22 +166,33 @@ pub fn periodic_reaction_system(
     }
 
     // Phase 1: collect pending effects (immutable chunk reads).
+
+    // Bolt: Pre-filter active periodic reactions for this tick to avoid checking
+    // every reaction for every chunk and tile.
+    let mut active_reactions = Vec::with_capacity(periodic_ids.len());
+    for rid in periodic_ids {
+        let reaction = match registry.get(*rid) {
+            Some(r) => r,
+            None => continue,
+        };
+
+        // Periodic phase-offset: skip ticks where (tick % every_ticks) != 0.
+        let crate::Trigger::Periodic { every_ticks } = reaction.trigger else {
+            continue;
+        };
+        if every_ticks > 0 && !tick.is_multiple_of(every_ticks as u64) {
+            continue;
+        }
+        active_reactions.push((rid, reaction));
+    }
+
+    if active_reactions.is_empty() {
+        return;
+    }
+
     for chunk in chunks.iter() {
         let coord = chunk.coord;
-        for rid in periodic_ids {
-            let reaction = match registry.get(*rid) {
-                Some(r) => r,
-                None => continue,
-            };
-
-            // Periodic phase-offset: skip ticks where (tick % every_ticks) != 0.
-            let crate::Trigger::Periodic { every_ticks } = reaction.trigger else {
-                continue;
-            };
-            if every_ticks > 0 && !tick.is_multiple_of(every_ticks as u64) {
-                continue;
-            }
-
+        for (rid, reaction) in &active_reactions {
             for idx in 0..tile_core::coords::CHUNK_AREA {
                 if let Some(min_t) = reaction.min_temperature
                     && chunk.temp[idx] < min_t
@@ -214,7 +225,7 @@ pub fn periodic_reaction_system(
                 pending.buffer.push(PendingEffect {
                     coord,
                     idx,
-                    reaction_id: *rid,
+                    reaction_id: **rid,
                     effects: reaction.effects.clone(),
                 });
             }
