@@ -26,7 +26,6 @@ pub fn liquid_vertical_flow(
 ) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
-        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
 
         // Check if chunk above has liquid that could fall into us
         let above = ChunkCoord {
@@ -39,12 +38,11 @@ pub fn liquid_vertical_flow(
         };
         let above_has_liquid = snapshot.chunk_has_liquid(above);
 
-        if !has_liquid && !above_has_liquid {
+        if !snapshot.chunk_has_liquid(coord) && !above_has_liquid {
             continue;
         }
 
-        let mut amounts = [0u8; CHUNK_AREA];
-        amounts.copy_from_slice(&*chunk.liquid_amount_read);
+        let amounts = &*chunk.liquid_amount_read;
         let mut amount_deltas = [0i16; CHUNK_AREA];
         // Track per-tile kind changes from vertical flow. None = unchanged.
         let mut kind_change: [Option<LiquidId>; CHUNK_AREA] = [None; CHUNK_AREA];

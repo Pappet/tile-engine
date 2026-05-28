@@ -1,5 +1,5 @@
 use bevy_ecs::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tile_core::chunk::ChunkData;
 use tile_core::coords::{CHUNK_AREA, ChunkCoord};
 use tile_core::liquid::{LIQ_NONE, LiquidId};
@@ -15,6 +15,7 @@ pub struct LiquidSnapshot {
     kinds: HashMap<ChunkCoord, Box<[LiquidId; CHUNK_AREA]>>,
     terrain: HashMap<ChunkCoord, Box<[MaterialId; CHUNK_AREA]>>,
     pressures: HashMap<ChunkCoord, Box<[u8; CHUNK_AREA]>>,
+    has_liquid: HashSet<ChunkCoord>,
 }
 
 impl LiquidSnapshot {
@@ -38,9 +39,7 @@ impl LiquidSnapshot {
 
     /// True if chunk exists in snapshot and has any non-zero liquid amount.
     pub fn chunk_has_liquid(&self, coord: ChunkCoord) -> bool {
-        self.amounts
-            .get(&coord)
-            .is_some_and(|a| a.iter().any(|&v| v > 0))
+        self.has_liquid.contains(&coord)
     }
 
     /// True if any of the 4 horizontal neighbor chunks exist in the snapshot.
@@ -138,6 +137,12 @@ pub fn snapshot_liquid(mut snapshot: ResMut<LiquidSnapshot>, chunks: Query<&Chun
             .entry(chunk.coord)
             .or_insert_with(|| Box::new([0u8; CHUNK_AREA]))
             .copy_from_slice(&*chunk.pressure_read);
+
+        if chunk.liquid_amount_read.iter().any(|&a| a > 0) {
+            snapshot.has_liquid.insert(chunk.coord);
+        } else {
+            snapshot.has_liquid.remove(&chunk.coord);
+        }
     }
 
     // Remove entries for chunks that no longer exist.
@@ -145,4 +150,5 @@ pub fn snapshot_liquid(mut snapshot: ResMut<LiquidSnapshot>, chunks: Query<&Chun
     snapshot.kinds.retain(|k, _| seen.contains(k));
     snapshot.terrain.retain(|k, _| seen.contains(k));
     snapshot.pressures.retain(|k, _| seen.contains(k));
+    snapshot.has_liquid.retain(|k| seen.contains(k));
 }

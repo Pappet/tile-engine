@@ -63,8 +63,7 @@ pub fn flow_with_pressure(
 pub fn pressure_propagation(mut chunks: Query<&mut ChunkData>, snapshot: Res<LiquidSnapshot>) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
-        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
-        if !has_liquid && !snapshot.has_any_neighbor_with_liquid(coord) {
+        if !snapshot.chunk_has_liquid(coord) && !snapshot.has_any_neighbor_with_liquid(coord) {
             chunk.pressure_write.fill(0);
             continue;
         }
@@ -171,15 +170,12 @@ pub fn fluid_step_local(
 ) {
     for mut chunk in chunks.iter_mut() {
         let coord = chunk.coord;
-        let has_liquid = chunk.liquid_amount_read.iter().any(|&a| a > 0);
-        if !has_liquid && !snapshot.has_any_neighbor(coord) {
+        if !snapshot.chunk_has_liquid(coord) && !snapshot.has_any_neighbor(coord) {
             continue;
         }
 
-        let mut amounts = [0u8; CHUNK_AREA];
-        amounts.copy_from_slice(&*chunk.liquid_amount_read);
-        let mut pressures = [0u8; CHUNK_AREA];
-        pressures.copy_from_slice(&*chunk.pressure_read);
+        let amounts = &*chunk.liquid_amount_read;
+        let pressures = &*chunk.pressure_read;
         let mut deltas = [0i16; CHUNK_AREA];
 
         // ── Intra-chunk: right + down pairs only ─────────────────────────
@@ -254,8 +250,8 @@ pub fn fluid_step_local(
                 r_our,
                 right,
                 r_nb,
-                &amounts,
-                &pressures,
+                amounts,
+                pressures,
                 &chunk.liquid_kind,
                 &chunk.terrain,
                 &snapshot,
@@ -270,8 +266,8 @@ pub fn fluid_step_local(
                 l_our,
                 left,
                 l_nb,
-                &amounts,
-                &pressures,
+                amounts,
+                pressures,
                 &chunk.liquid_kind,
                 &chunk.terrain,
                 &snapshot,
@@ -287,8 +283,8 @@ pub fn fluid_step_local(
                 d_our,
                 down,
                 d_nb,
-                &amounts,
-                &pressures,
+                amounts,
+                pressures,
                 &chunk.liquid_kind,
                 &chunk.terrain,
                 &snapshot,
@@ -303,8 +299,8 @@ pub fn fluid_step_local(
                 u_our,
                 up,
                 u_nb,
-                &amounts,
-                &pressures,
+                amounts,
+                pressures,
                 &chunk.liquid_kind,
                 &chunk.terrain,
                 &snapshot,
