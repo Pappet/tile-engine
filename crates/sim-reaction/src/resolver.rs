@@ -168,12 +168,11 @@ pub fn periodic_reaction_system(
     // Pre-filter to only reactions that fire this tick, avoiding O(Chunks * TotalReactions).
     let mut active_reactions = Vec::with_capacity(periodic_ids.len());
     for rid in periodic_ids {
-        if let Some(reaction) = registry.get(*rid) {
-            if let crate::Trigger::Periodic { every_ticks } = reaction.trigger {
-                if every_ticks == 0 || tick.is_multiple_of(every_ticks as u64) {
-                    active_reactions.push((*rid, reaction));
-                }
-            }
+        if let Some(reaction) = registry.get(*rid)
+            && let crate::Trigger::Periodic { every_ticks } = reaction.trigger
+            && (every_ticks == 0 || tick.is_multiple_of(every_ticks as u64))
+        {
+            active_reactions.push((*rid, reaction));
         }
     }
     if active_reactions.is_empty() {
