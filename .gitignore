@@ -21,4 +21,5 @@ Thumbs.db
 .cursorrules
 .opencode.json
 .mcp.json
-docs/
+docs/*
+!docs/CODE_AUDIT.md
