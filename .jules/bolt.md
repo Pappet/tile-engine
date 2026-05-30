@@ -1,0 +1,3 @@
+## 2026-05-30 - Cross-Crate Inlining of Hot-Path Math Functions
+**Learning:** Small, frequently called math and utility functions (such as `mix_hash` and coordinate conversions in `crates/core`) that are used across crate boundaries in simulation hot paths must be explicitly marked `#[inline]` to guarantee cross-crate inlining by LLVM. Without this, the overhead of function calls across crates can significantly impact performance in tight inner loops, which is exactly where these math functions are typically used.
+**Action:** Always ensure that small, stateless functions on critical paths, especially those exported across workspace crates, are decorated with `#[inline]` (or `#[inline(always)]` if appropriate).
