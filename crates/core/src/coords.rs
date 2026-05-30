@@ -26,6 +26,7 @@ pub struct LocalPos {
 }
 
 impl WorldPos {
+    #[inline]
     pub fn split(self) -> (ChunkCoord, LocalPos) {
         let cc = ChunkCoord {
             cx: self.x >> CHUNK_SHIFT,
@@ -41,6 +42,7 @@ impl WorldPos {
 }
 
 impl ChunkCoord {
+    #[inline]
     pub fn world_pos(self, lp: LocalPos) -> WorldPos {
         WorldPos {
             x: (self.cx << CHUNK_SHIFT) | (lp.lx as i32),
@@ -51,10 +53,12 @@ impl ChunkCoord {
 }
 
 impl LocalPos {
+    #[inline]
     pub fn index(self) -> usize {
         (self.ly as usize) * CHUNK_SIZE + (self.lx as usize)
     }
 
+    #[inline]
     pub fn from_index(index: usize) -> Self {
         debug_assert!(index < CHUNK_AREA);
         LocalPos {
