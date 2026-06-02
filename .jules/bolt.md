@@ -1,0 +1,3 @@
+## 2024-06-02 - Inline `mix_hash` and Short-circuit Probability Rolls
+**Learning:** Small, frequently called math functions like `mix_hash` (used across crate boundaries in hot simulation loops) aren't automatically inlined by rustc across crates, adding significant call overhead. Additionally, expensive dynamic condition evaluations in CA updates were being performed before cheap stateless probability checks, wasting computation on events that would ultimately fail their probability roll.
+**Action:** Always add `#[inline]` to cross-crate hot-path functions, and restructure simulation logic to evaluate cheap stateless probability checks before expensive dynamic data reads to enable early short-circuiting.
