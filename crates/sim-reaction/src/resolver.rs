@@ -195,6 +195,14 @@ pub fn periodic_reaction_system(
                     continue;
                 }
 
+                // Probability roll (cheap, do before expensive evaluate).
+                if reaction.probability < u16::MAX {
+                    let h = mix_hash(coord, idx, tick, rid.0);
+                    if (h & 0xFFFF) >= reaction.probability as u64 {
+                        continue;
+                    }
+                }
+
                 // Evaluate conditions (no incoming liquid for Periodic).
                 if !reaction
                     .conditions
@@ -202,14 +210,6 @@ pub fn periodic_reaction_system(
                     .all(|c| evaluate(c, chunk, idx, &material_reg, &liquid_reg, None))
                 {
                     continue;
-                }
-
-                // Probability roll.
-                if reaction.probability < u16::MAX {
-                    let h = mix_hash(coord, idx, tick, rid.0);
-                    if (h & 0xFFFF) >= reaction.probability as u64 {
-                        continue;
-                    }
                 }
 
                 pending.buffer.push(PendingEffect {
@@ -276,6 +276,14 @@ pub fn liquid_collision_reaction_system(
                 None => continue,
             };
 
+            // Probability roll (cheap, do before expensive evaluate).
+            if reaction.probability < u16::MAX {
+                let h = mix_hash(event.coord, event.idx, tick, rid.0);
+                if (h & 0xFFFF) >= reaction.probability as u64 {
+                    continue;
+                }
+            }
+
             if !reaction.conditions.iter().all(|c| {
                 evaluate(
                     c,
@@ -287,13 +295,6 @@ pub fn liquid_collision_reaction_system(
                 )
             }) {
                 continue;
-            }
-
-            if reaction.probability < u16::MAX {
-                let h = mix_hash(event.coord, event.idx, tick, rid.0);
-                if (h & 0xFFFF) >= reaction.probability as u64 {
-                    continue;
-                }
             }
 
             let effects = reaction.effects.clone();

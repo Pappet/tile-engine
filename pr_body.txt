@@ -1,0 +1,15 @@
+💡 What
+- Moved the cheap, stateless probability roll (`mix_hash`) to execute *before* the expensive memory-dependent `evaluate` condition loops in `periodic_reaction_system` and `liquid_collision_reaction_system`.
+- Added the `#[inline]` attribute to the small, heavily used `mix_hash` utility function in `crates/core` to permit cross-crate inlining into the hot simulation loops.
+
+🎯 Why
+- Evaluating reaction conditions requires chunk memory reads and iteration over tile indices, which is expensive. Doing a simple, stateless probability check first allows short-circuiting execution for reactions that fail the probability roll.
+- `mix_hash` is a tiny mathematical utility called constantly across crate boundaries in hot simulation loops. Without `#[inline]`, the compiler may not optimize away the severe cross-crate function call overhead.
+
+📊 Impact
+- Reduces redundant memory lookups and CPU cycles wasted on evaluating conditions that would ultimately be rejected by a subsequent probability roll.
+- Eliminates function call overhead for `mix_hash`, lowering the baseline per-tile execution time of reaction systems.
+
+🔬 Measurement
+- Run `cargo test` to ensure determinism and reaction logic remain fully correct.
+- CPU profiling should reveal a decrease in time spent inside `evaluate` and `mix_hash` stack frames during active fluid/reaction simulations.
