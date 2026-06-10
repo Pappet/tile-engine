@@ -205,8 +205,10 @@ mod tests {
     }
 
     fn make_world_with_chunks(chunks: &[(ChunkCoord, Entity)]) -> World {
-        let mut w = World::default();
-        w.current_tick = 42;
+        let mut w = World {
+            current_tick: 42,
+            ..Default::default()
+        };
         for (coord, entity) in chunks {
             w.chunks.insert(*coord, *entity);
         }

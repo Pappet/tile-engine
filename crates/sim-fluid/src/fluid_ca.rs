@@ -753,6 +753,8 @@ mod tests {
     /// Liquid spreads along connector row then fills right column.
     /// After N ticks both columns equalize within ±3 total.
     #[test]
+    // `0 * CHUNK_SIZE` / `1 * CHUNK_SIZE` spell out the row index for readability.
+    #[allow(clippy::erasing_op, clippy::identity_op)]
     fn test_u_pipe_equalizes() {
         let mut app = make_app_with_pressure();
         let coord = ChunkCoord {
