@@ -4,6 +4,7 @@ use crate::coords::ChunkCoord;
 ///
 /// Mixes coord + tile index + tick + reaction ID using finalizer from
 /// splitmix64. No global state — parallel-safe and reproducible.
+#[inline]
 pub fn mix_hash(coord: ChunkCoord, idx: usize, tick: u64, rid: u32) -> u64 {
     let mut h: u64 = 0xcafef00dd15ea5e5;
     h ^= (coord.cx as i64 as u64).wrapping_mul(0x9e3779b97f4a7c15);
